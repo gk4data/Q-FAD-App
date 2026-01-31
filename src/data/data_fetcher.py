@@ -6,7 +6,8 @@ BASE = "https://api.upstox.com/v2"
 
 def _normalize_date(date_str: str) -> str:
     """Convert DD-MM-YYYY or YYYY-MM-DD to YYYY-MM-DD"""
-    for fmt in ("%d-%m-%Y", "%Y-%m-%d"):
+    # Support common day-first and ISO formats, plus accidental YYYY-DD-MM inputs
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%Y-%d-%m"):
         try:
             return datetime.strptime(date_str, fmt).strftime("%Y-%m-%d")
         except ValueError:

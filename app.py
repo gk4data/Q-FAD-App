@@ -5,6 +5,7 @@ import os
 import traceback
 import pandas as pd
 import numpy as np
+from datetime import date
 from shiny import App, ui, render, reactive
 from shinywidgets import output_widget, render_plotly
 
@@ -14,6 +15,7 @@ from src.data.data_fetcher import fetch_intraday_data
 from src.data.instrument_manager import InstrumentManager  # NEW
 from src.indicators.indicators import calculate_indicators
 from src.signals.regime_detection import detect_regimes_relaxed
+from src.signals.angle_classification import classify_trend_by_angles
 from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
 from src.viz.plot_signals import plot_signals
@@ -25,7 +27,7 @@ from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats
 # ---------------------------
 app_ui = ui.page_sidebar(
     ui.sidebar(
-        ui.h4("🔐 Authentication"),
+        ui.h4("Authentication"),
         ui.output_text_verbatim("auth_status"),
         ui.input_action_button("show_login", "Show Login URL", class_="btn-primary"),
         ui.output_ui("login_url_display"),
@@ -35,18 +37,23 @@ app_ui = ui.page_sidebar(
         ui.tags.hr(),
 
         # NEW: Instrument Selector Section
-        ui.h4("🔧 Instrument Selector"),
+        ui.h4("Instrument Selector"),
         ui.row(
             ui.column(
-                6,
-                ui.input_action_button("load_instruments", "📥 Load Instruments", class_="btn-info btn-sm"),
+                4,
+                ui.input_action_button("load_instruments", "Load Instruments", class_="btn-info btn-sm"),
             ),
             ui.column(
-                6,
+                4,
                 ui.input_checkbox("auto_load_instruments", "Auto-load", value=True)
+            ),
+            ui.column(
+                4,
+                ui.input_checkbox("use_local_instruments", "Use local NSE_Output.xlsx", value=True)
             )
         ),
         ui.output_text_verbatim("instruments_status"),
+        ui.output_text_verbatim("instruments_debug"),
         ui.tags.hr(),
         
         # Symbol, Expiry, Type Selection
@@ -66,11 +73,13 @@ app_ui = ui.page_sidebar(
         ui.h5("Step 4: Select Strike"),
         ui.output_ui("strike_selector"),
         
-        ui.input_action_button("apply_instrument", "✅ Apply Selection", class_="btn-success btn-sm"),
-        ui.output_ui("selected_instrument_display"),
+        ui.row(
+            ui.column(4, ui.input_action_button("apply_instrument", "Apply Selection", class_="btn-success btn-sm")),
+            ui.column(8, ui.output_ui("selected_instrument_display"))
+        ),
         ui.tags.hr(),
 
-        ui.h4("📊 Data & Processing"),
+        ui.h4("Data & Processing"),
         ui.input_text("instrument", "Instrument Key", value="NSE_FO|40088", placeholder="Auto-filled or manual"),
         ui.input_select("interval", "Interval", choices=["1minute", "5minute", "15minute"], selected="1minute"),
         ui.input_radio_buttons(
@@ -80,20 +89,20 @@ app_ui = ui.page_sidebar(
         ),
         ui.panel_conditional(
             "input.fetch_mode === 'date_range'",
-            ui.input_text("start_date", "Start (YYYY-MM-DD or DD-MM-YYYY)", value="2025-11-04"),
-            ui.input_text("end_date", "End (YYYY-MM-DD or DD-MM-YYYY)", value="2025-11-04"),
+            ui.input_date("start_date", "Start", value=date.today()),
+            ui.input_date("end_date", "End", value=date.today()),
         ),
         ui.input_action_button("fetch", "Fetch & Process", class_="btn-primary"),
         ui.input_checkbox("auto_save", "Save CSV after fetch", value=True),
         ui.input_text("save_dir", "Optional Save Directory", value=""),
         ui.tags.hr(),
 
-        ui.h4("📈 Backtesting"),
+        ui.h4("Backtesting"),
         ui.input_numeric("initial_cash", "Initial Capital ($)", value=100000, min=1000, max=10000000),
         ui.input_action_button("run_backtest", "Run Backtest", class_="btn-warning"),
         ui.tags.hr(),
 
-        ui.p("📡 Status:"),
+        ui.p("Status:"),
         ui.output_text_verbatim("status")
     ),
     ui.navset_tab(
@@ -112,7 +121,7 @@ app_ui = ui.page_sidebar(
             ui.output_data_frame("trades_table")
         ),
     ),
-    title="📈 Upstox Algo Trading (Q-FAD)"
+    title="Upstox Algo Trading (Q-FAD)"
 )
 
 
@@ -148,9 +157,9 @@ def server(input, output, session):
         cached = client.get_cached_token()
         if cached:
             token.set(cached)
-            status_msg.set("✅ Using cached token (valid for 24h)")
+            status_msg.set("[OK] Using cached token (valid for 24h)")
         else:
-            status_msg.set("⏳ No valid token. Click 'Show Login URL' to authenticate.")
+            status_msg.set("[INFO] No valid token. Click 'Show Login URL' to authenticate.")
 
     # NEW: Auto-load instruments on startup
     @reactive.effect
@@ -158,11 +167,12 @@ def server(input, output, session):
         if input.auto_load_instruments():
             try:
                 instruments_loaded.set(False)
-                if instrument_manager.fetch_instruments(force_refresh=False):
+                prefer_local = input.use_local_instruments() if 'use_local_instruments' in dir(input) else True
+                if instrument_manager.fetch_instruments(force_refresh=False, prefer_local=prefer_local):
                     symbols = instrument_manager.get_unique_symbols()
                     available_symbols.set(symbols)
                     instruments_loaded.set(True)
-                    status_msg.set(f"✅ Instruments auto-loaded: {len(symbols)} symbols")
+                    status_msg.set(f"[OK] Instruments auto-loaded: {len(symbols)} symbols")
             except Exception as e:
                 print(f"Auto-load error: {e}")
 
@@ -172,9 +182,9 @@ def server(input, output, session):
     def auth_status():
         t = token.get()
         if t:
-            return "✅ Authenticated (cached token valid)"
+            return "[OK] Authenticated (cached token valid)"
         else:
-            return "❌ Not authenticated"
+            return "[ERROR] Not authenticated"
 
     # Status text
     @output
@@ -187,9 +197,29 @@ def server(input, output, session):
     @render.text
     def instruments_status():
         if instruments_loaded.get():
-            return f"✅ Ready | {len(available_symbols.get())} symbols loaded"
+            src = getattr(instrument_manager, 'source', None)
+            src_display = f" ({src})" if src else ""
+            return f"[OK] Ready | {len(available_symbols.get())} symbols loaded{src_display}"
         else:
-            return "⏳ Click 'Load Instruments' or enable Auto-load"
+            return "[INFO] Click 'Load Instruments' or enable Auto-load"
+
+    # DEBUG: Instruments debug info (temporary)
+    @output
+    @render.text
+    def instruments_debug():
+        sel = None
+        if 'select_symbol' in dir(input):
+            try:
+                sel = input.select_symbol()
+            except Exception:
+                sel = None
+        return (
+            f"selected_symbol: {sel}\n"
+            f"instruments_loaded: {instruments_loaded.get()}\n"
+            f"available_symbols: {len(available_symbols.get())}\n"
+            f"available_expiries: {len(available_expiries.get())}\n"
+            f"available_strikes: {len(available_strikes.get())}\n"
+        )
 
     # Show login URL
     @reactive.effect
@@ -198,9 +228,9 @@ def server(input, output, session):
         try:
             url = client.get_login_url()
             login_url.set(url)
-            status_msg.set("🔗 Login URL generated. Open in browser and complete auth.")
+            status_msg.set("[INFO] Login URL generated. Open in browser and complete auth.")
         except Exception as e:
-            status_msg.set(f"❌ Error generating login URL: {e}")
+            status_msg.set(f"[ERROR] Error generating login URL: {e}")
             traceback.print_exc()
 
     @output
@@ -211,7 +241,7 @@ def server(input, output, session):
             return ui.div()
         return ui.div(
             ui.p("Open this URL in your browser:"),
-            ui.tags.a("🔗 Upstox Login", href=url, target="_blank", class_="btn btn-link"),
+            ui.tags.a("Upstox Login", href=url, target="_blank", class_="btn btn-link"),
             ui.tags.hr(),
             ui.tags.code(url, style="font-size:0.8em;word-wrap:break-word;")
         )
@@ -222,14 +252,14 @@ def server(input, output, session):
     def _():
         code = input.auth_code()
         if not code or code.strip() == "":
-            status_msg.set("❌ Please provide auth code")
+            status_msg.set("[ERROR] Please provide auth code")
             return
         try:
             tkn = client.exchange_token(code.strip())
             token.set(tkn)
-            status_msg.set("✅ Authenticated successfully! Token cached for 24h.")
+            status_msg.set("[OK] Authenticated successfully! Token cached for 24h.")
         except Exception as e:
-            status_msg.set(f"❌ Auth failed: {e}")
+            status_msg.set(f"[ERROR] Auth failed: {e}")
             traceback.print_exc()
 
     # Clear token cache
@@ -239,23 +269,27 @@ def server(input, output, session):
         if client.token_manager:
             client.token_manager.clear_token()
         token.set(None)
-        status_msg.set("❌ Token cache cleared. Click 'Show Login URL' to re-authenticate.")
+        status_msg.set("[OK] Token cache cleared. Click 'Show Login URL' to re-authenticate.")
 
     # NEW: Load instruments button
     @reactive.effect
     @reactive.event(input.load_instruments)
     def _():
         try:
-            status_msg.set("⏳ Loading instruments from Upstox...")
-            if instrument_manager.fetch_instruments(force_refresh=True):
+            status_msg.set("[INFO] Loading instruments...")
+            # If user wants to force API reload despite local file, they can clear the checkbox
+            prefer_local = input.use_local_instruments() if 'use_local_instruments' in dir(input) else True
+            # When user actively clicks 'Load Instruments' we allow refresh from API by passing force_refresh=True
+            loaded = instrument_manager.fetch_instruments(force_refresh=True, prefer_local=prefer_local)
+            if loaded:
                 symbols = instrument_manager.get_unique_symbols()
                 available_symbols.set(symbols)
                 instruments_loaded.set(True)
-                status_msg.set(f"✅ Loaded {len(symbols)} symbols")
+                status_msg.set(f"[OK] Loaded {len(symbols)} symbols (source: {getattr(instrument_manager, 'source', 'unknown')})")
             else:
-                status_msg.set("❌ Failed to load instruments")
+                status_msg.set("[ERROR] Failed to load instruments")
         except Exception as e:
-            status_msg.set(f"❌ Error: {e}")
+            status_msg.set(f"[ERROR] Error: {e}")
             traceback.print_exc()
 
     # NEW: Symbol selector UI
@@ -264,69 +298,115 @@ def server(input, output, session):
     def symbol_selector():
         symbols = available_symbols.get()
         if not symbols:
-            return ui.div("⏳ Load instruments first", style="color: #999;")
-        return ui.input_select("select_symbol", "Choose Symbol", choices=symbols)
+            return ui.div("Load instruments first", style="color: #999;")
+        print(f"[DEBUG] symbol_selector render: {len(symbols)} symbols, default={symbols[0]}")
+        # Default to first symbol so expiry update triggers immediately
+        return ui.input_select("select_symbol", "Choose Symbol", choices=symbols, selected=symbols[0])
 
     # NEW: Update expiries when symbol changes
     @reactive.effect
     def _update_expiries():
-        symbol = input.select_symbol() if 'select_symbol' in dir(input) else None
+        symbol = input.select_symbol()
+        print(f"[DEBUG] _update_expiries triggered: symbol={symbol}, instruments_loaded={instruments_loaded.get()}")
+        if not symbol:
+            return
         if symbol and instruments_loaded.get():
             try:
                 expiries = instrument_manager.get_expiry_dates(symbol)
+                print(f"[DEBUG] _update_expiries: fetched {len(expiries)} expiries for {symbol}")
                 available_expiries.set(expiries)
                 selected_symbol.set(symbol)
             except Exception as e:
                 available_expiries.set([])
-                print(f"Error fetching expiries: {e}")
+                print(f"[ERROR] Error fetching expiries: {e}")
 
-    # NEW: Expiry selector UI
+    # NEW: Expiry selector UI (calendar picker)
     @output
     @render.ui
     def expiry_selector():
         expiries = available_expiries.get()
+        print(f"[DEBUG] expiry_selector render: {len(expiries)} expiries available")
         if not expiries:
             return ui.div("Select symbol first", style="color: #999;")
-        return ui.input_select("select_expiry", "Choose Expiry", choices=expiries)
+
+        # Convert expiry strings (YYYY-MM-DD) to date objects for the calendar picker
+        try:
+            expiry_dates = [pd.to_datetime(x).date() for x in expiries]
+        except Exception:
+            expiry_dates = []
+
+        if not expiry_dates:
+            return ui.div("No valid expiries", style="color: #999;")
+
+        default = expiry_dates[0]
+        min_date = min(expiry_dates)
+        max_date = max(expiry_dates)
+
+        print(f"[DEBUG] expiry_selector default (date): {default}")
+        return ui.input_date("select_expiry", "Choose Expiry", value=default, min=min_date, max=max_date)
 
     # NEW: Update strikes when symbol or type changes
     @reactive.effect
     def _update_strikes():
-        symbol = input.select_symbol() if 'select_symbol' in dir(input) else None
-        expiry = input.select_expiry() if 'select_expiry' in dir(input) else None
-        instr_type = input.select_type() if 'select_type' in dir(input) else 'CE'
+        symbol = input.select_symbol()
+        expiry = input.select_expiry()
+        instr_type = input.select_type()
 
+        print(f"[DEBUG] _update_strikes triggered: symbol={symbol}, expiry={expiry}, type={instr_type}, instruments_loaded={instruments_loaded.get()}")
+
+        # If futures selected, no strikes to compute
+        if instr_type and instr_type.upper() == 'FUT':
+            available_strikes.set([])
+            selected_expiry.set(expiry)
+            print(f"[DEBUG] FUT selected -> available_strikes cleared")
+            return
+
+        if not (symbol and expiry and instruments_loaded.get()):
+            return
         if symbol and expiry and instruments_loaded.get():
             try:
                 strikes = instrument_manager.get_strikes(symbol, expiry, instr_type)
+                print(f"[DEBUG] _update_strikes: fetched {len(strikes)} strikes")
                 available_strikes.set(strikes)
                 selected_expiry.set(expiry)
             except Exception as e:
                 available_strikes.set([])
-                print(f"Error fetching strikes: {e}")
+                print(f"[ERROR] Error fetching strikes: {e}")
 
-    # NEW: Strike selector UI
+    # NEW: Strike selector UI (always present for options)
     @output
     @render.ui
     def strike_selector():
         strikes = available_strikes.get()
-        if not strikes:
-            return ui.div("Select expiry and type first", style="color: #999;")
-        # Convert to strings for select choices
-        strike_choices = [str(s) for s in strikes]
-        return ui.input_select("select_strike", "Choose Strike", choices=strike_choices)
+        instr_type = input.select_type()
+        print(f"[DEBUG] strike_selector render: instr_type={instr_type}, strikes_count={len(strikes) if strikes else 0}")
+
+        # For futures, no strike selection is required
+        if instr_type and instr_type.upper() == 'FUT':
+            return ui.div("Futures selected — no strike required", style="color: #333;")
+
+        # Prefill with a suggested strike when available, else empty
+        default = str(strikes[0]) if strikes else ""
+        print(f"[DEBUG] strike_selector default (manual): {default}")
+
+        helper = ui.div("No strikes found — enter strike manually", style="color: #999;") if not strikes else ui.div(f"Suggested: {', '.join(str(s) for s in strikes[:6])}", style="color: #666; font-size:0.9em")
+
+        return ui.tags.div(
+            ui.input_text("select_strike", "Strike (enter numeric)", value=default, placeholder="e.g. 23100"),
+            helper
+        )
 
     # NEW: Apply instrument selection
     @reactive.effect
     @reactive.event(input.apply_instrument)
     def _():
-        symbol = input.select_symbol() if 'select_symbol' in dir(input) else None
-        expiry = input.select_expiry() if 'select_expiry' in dir(input) else None
-        strike_val = input.select_strike() if 'select_strike' in dir(input) else None
-        instr_type = input.select_type() if 'select_type' in dir(input) else 'CE'
+        symbol = input.select_symbol()
+        expiry = input.select_expiry()
+        strike_val = input.select_strike()
+        instr_type = input.select_type()
 
         if not all([symbol, expiry, instr_type]):
-            status_msg.set("❌ Select Symbol, Expiry, and Type")
+            status_msg.set("[ERROR] Select Symbol, Expiry, and Type")
             return
 
         try:
@@ -335,7 +415,7 @@ def server(input, output, session):
                 strike_display = "FUT"
             else:
                 if not strike_val:
-                    status_msg.set("❌ Select Strike for Options")
+                    status_msg.set("[ERROR] Select Strike for Options")
                     return
                 strike = int(strike_val)
                 key = instrument_manager.get_instrument_key(symbol, expiry, strike, instr_type)
@@ -344,11 +424,18 @@ def server(input, output, session):
             if key:
                 selected_instrument_key.set(key)
                 selected_strike.set(strike_val if instr_type != 'FUT' else None)
-                status_msg.set(f"✅ Selected: {symbol} {expiry} {strike_display} {instr_type}")
+                # Populate the Data & Processing Instrument Key input so the user can fetch immediately
+                try:
+                    # Use the Shiny helper to update text input value so it's compatible across versions
+                    ui.update_text("instrument", value=key, session=session)
+                    print(f"[DEBUG] ui.update_text instrument={key}")
+                except Exception as e:
+                    print(f"[WARN] Could not update input instrument via ui.update_text: {e}")
+                status_msg.set(f"[OK] Selected: {symbol} {expiry} {strike_display} {instr_type}")
             else:
-                status_msg.set(f"❌ Instrument not found")
+                status_msg.set(f"[ERROR] Instrument not found")
         except Exception as e:
-            status_msg.set(f"❌ Error: {e}")
+            status_msg.set(f"[ERROR] Error: {e}")
             traceback.print_exc()
 
     # NEW: Display selected instrument
@@ -364,12 +451,33 @@ def server(input, output, session):
             )
         return ui.div()
 
+    # Sync selected instrument key into the 'instrument' input field so it is prefilled for fetching
+    @reactive.effect
+    def _sync_selected_instrument():
+        key = selected_instrument_key.get()
+        if not key:
+            return
+        try:
+            current = None
+            try:
+                current = input.instrument()
+            except Exception:
+                current = None
+            if current != key:
+                try:
+                    ui.update_text("instrument", value=key, session=session)
+                    print(f"[DEBUG] _sync_selected_instrument set instrument={key}")
+                except Exception as e:
+                    print(f"[WARN] Could not update input instrument via ui.update_text in sync: {e}")
+        except Exception as e:
+            print(f"[WARN] _sync_selected_instrument error: {e}")
+
     # Fetch and process data
     @reactive.effect
     @reactive.event(input.fetch)
     def _():
         if not token.get():
-            status_msg.set("❌ Authenticate first before fetching data")
+            status_msg.set("[ERROR] Authenticate first before fetching data")
             return
         try:
             # Use selected instrument if available, else manual input
@@ -377,50 +485,65 @@ def server(input, output, session):
             inst = key if key else input.instrument().strip()
 
             if not inst or inst == "NSE_FO|40088":
-                status_msg.set("❌ Please select an instrument")
+                status_msg.set("[ERROR] Please select an instrument")
                 return
 
             interval = input.interval()
             mode = input.fetch_mode()
 
-            status_msg.set(f"⏳ Fetching data for {inst}...")
+            status_msg.set(f"[INFO] Fetching data for {inst}...")
 
             if mode == "intraday":
                 raw_df = fetch_intraday_data(
                     inst, token.get(), interval=interval, mode="intraday"
                 )
             else:
-                start = input.start_date().strip()
-                end = input.end_date().strip()
+                start_val = input.start_date()
+                end_val = input.end_date()
+                # Accept date object or string; normalize to YYYY-MM-DD
+                from datetime import date as _date, datetime as _dt
+                def _as_iso(d):
+                    if isinstance(d, (_date, _dt)):
+                        return d.strftime("%Y-%m-%d")
+                    if d is None:
+                        return None
+                    s = str(d).strip()
+                    return s
+
+                start = _as_iso(start_val)
+                end = _as_iso(end_val)
+
                 if not start or not end:
-                    status_msg.set("❌ Please provide start and end dates")
+                    status_msg.set("[ERROR] Please provide start and end dates")
                     return
+
                 raw_df = fetch_intraday_data(
                     inst, token.get(), interval=interval, mode="date_range", start=start, end=end
                 )
 
             if raw_df is None or raw_df.empty:
-                status_msg.set("❌ No data returned from API")
+                status_msg.set("[ERROR] No data returned from API")
                 return
 
-            status_msg.set(f"⏳ Processing {len(raw_df)} rows...")
+            status_msg.set(f"[INFO] Processing {len(raw_df)} rows...")
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
+            df = classify_trend_by_angles(df)
             df = add_long_signal(df)
             df_data.set(df)
 
             if input.auto_save():
                 base_dir = input.save_dir().strip() or None
                 path = save_to_csv(df, base_dir=base_dir)
-                status_msg.set(f"✅ Fetched & processed {len(df)} rows. Saved: {path}")
+                status_msg.set(f"[OK] Fetched & processed {len(df)} rows. Saved: {path}")
             else:
-                status_msg.set(f"✅ Fetched & processed {len(df)} rows successfully!")
+                status_msg.set(f"[OK] Fetched & processed {len(df)} rows successfully!")
 
         except ValueError as ve:
-            status_msg.set(f"❌ Date format error: {ve}")
+            status_msg.set(f"[ERROR] Date format error: {ve}")
             traceback.print_exc()
         except Exception as e:
-            status_msg.set(f"❌ Error: {str(e)}")
+            status_msg.set(f"[ERROR] Error: {str(e)}")
             traceback.print_exc()
 
     # Run backtest
@@ -429,11 +552,11 @@ def server(input, output, session):
     def _():
         df = df_data.get()
         if df is None or df.empty:
-            status_msg.set("❌ Fetch & Process data first before backtesting")
+            status_msg.set("[ERROR] Fetch & Process data first before backtesting")
             return
 
         try:
-            status_msg.set("⏳ Running backtest...")
+            status_msg.set("[INFO] Running backtest...")
             cash = input.initial_cash()
             initial_cash_used.set(cash)
 
@@ -444,11 +567,11 @@ def server(input, output, session):
             trades_data.set(trades_df)
 
             if len(trades_df) == 0:
-                status_msg.set("⚠️ No complete trades (no matching buy/sell signal pairs)")
+                status_msg.set("[WARN] No complete trades (no matching buy/sell signal pairs)")
             else:
-                status_msg.set(f"✅ Backtest complete! {len(trades_df)} trades executed.")
+                status_msg.set(f"[OK] Backtest complete! {len(trades_df)} trades executed.")
         except Exception as e:
-            status_msg.set(f"❌ Backtest error: {str(e)}")
+            status_msg.set(f"[ERROR] Backtest error: {str(e)}")
             traceback.print_exc()
 
     # Chart plot
@@ -529,7 +652,7 @@ def server(input, output, session):
                     )
                 )
             return ui.div(
-                ui.h4("📊 Backtest Results"),
+                ui.h4("Backtest Results"),
                 ui.tags.table(
                     ui.tags.tbody(*rows),
                     style="border-collapse: collapse; width: 100%; margin-top: 10px; border: 1px solid #ddd;",
