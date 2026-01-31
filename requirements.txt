@@ -1,0 +1,12 @@
+shiny>=0.8.0
+shinywidgets>=0.3.0
+pandas>=1.5
+numpy>=1.20
+pandas_ta
+plotly==6.4.0
+requests
+python-dotenv
+backtesting>=0.3.3
+tqdm
+openpyxl
+nbformat
