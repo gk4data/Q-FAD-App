@@ -30,7 +30,11 @@ def calculate_manual_pnl(df, initial_cash=100000.0, commission=0.0, fractional_s
             bool(row.get('Mid_Buy_Signal_2', False)) or
             bool(row.get('OverSold_Buy_Signal', False)) or
             bool(row.get('RSI_Range_Buy_Signal', False)) or
-            bool(row.get('Super_Low_Buy_Signal', False))
+            bool(row.get('Super_Low_Buy_Signal', False)) or 
+            bool(row.get('Super_Low_Buy_Signal_2', False)) or 
+            bool(row.get('New_Uptrend_Buy_Signal', False)) or
+            bool(row.get('Downtrend_Reverse_Buy_Signal', False)) or 
+            bool(row.get('RSI_pct_buy', False))
         )
         sell_signal = bool(row.get('Sell_Signal', False))
 
