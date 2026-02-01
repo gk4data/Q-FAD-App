@@ -11,7 +11,7 @@ from shinywidgets import output_widget, render_plotly
 
 # Project imports - aligned with your structure
 from src.clients.upstox_client import UpstoxClient
-from src.data.data_fetcher import fetch_intraday_data
+from src.data.data_fetcher import fetch_intraday_data, concatenate_with_previous_day, filter_to_current_day
 from src.data.instrument_manager import InstrumentManager  # NEW
 from src.indicators.indicators import calculate_indicators
 from src.signals.regime_detection import detect_regimes_relaxed
@@ -604,19 +604,54 @@ def server(input, output, session):
                 status_msg.set("[ERROR] No data returned from API")
                 return
 
-            status_msg.set(f"[INFO] Processing {len(raw_df)} rows...")
+            # Determine the target date (the date we're fetching data for)
+            from datetime import date as _date, datetime as _dt
+            def _as_iso(d):
+                if isinstance(d, (_date, _dt)):
+                    return d.strftime("%Y-%m-%d")
+                if d is None:
+                    return None
+                s = str(d).strip()
+                return s
+
+            # Get target date based on fetch mode
+            if mode == "intraday":
+                target_date_str = _as_iso(_dt.now().date())
+            else:
+                target_date_str = _as_iso(end_val)
+
+            status_msg.set(f"[INFO] Concatenating with previous market day data...")
+            
+            # Concatenate with previous day's data for indicator calculation warmup
+            if mode == "expired":
+                raw_df = concatenate_with_previous_day(
+                    raw_df, inst, token.get(), target_date_str, 
+                    interval=interval, mode="expired", expiry_for_expired=expiry_iso
+                )
+            else:
+                raw_df = concatenate_with_previous_day(
+                    raw_df, inst, token.get(), target_date_str, 
+                    interval=interval, mode="date_range"
+                )
+
+            status_msg.set(f"[INFO] Processing {len(raw_df)} rows (combined with previous day)...")
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
             df = add_long_signal(df)
+            
+            # Filter back to current day only after indicators are calculated
+            status_msg.set(f"[INFO] Filtering to current day data only...")
+            df = filter_to_current_day(df, target_date_str)
+            
             df_data.set(df)
 
             if input.auto_save():
                 base_dir = input.save_dir().strip() or None
                 path = save_to_csv(df, base_dir=base_dir)
-                status_msg.set(f"[OK] Fetched & processed {len(df)} rows. Saved: {path}")
+                status_msg.set(f"[OK] Fetched & processed {len(df)} rows (current day only). Saved: {path}")
             else:
-                status_msg.set(f"[OK] Fetched & processed {len(df)} rows successfully!")
+                status_msg.set(f"[OK] Fetched & processed {len(df)} rows (current day only) successfully!")
 
         except ValueError as ve:
             status_msg.set(f"[ERROR] Date format error: {ve}")
