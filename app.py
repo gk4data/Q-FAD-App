@@ -84,11 +84,11 @@ app_ui = ui.page_sidebar(
         ui.input_select("interval", "Interval", choices=["1minute", "5minute", "15minute"], selected="1minute"),
         ui.input_radio_buttons(
             "fetch_mode", "Fetch mode",
-            choices={"intraday": "Intraday (session)", "date_range": "Date range"},
+            choices={"intraday": "Intraday (session)", "date_range": "Active Options Date Range", "expired": "Expired Options (date range)"},
             selected="date_range", inline=True
         ),
         ui.panel_conditional(
-            "input.fetch_mode === 'date_range'",
+            "input.fetch_mode === 'date_range' || input.fetch_mode === 'expired'",
             ui.input_date("start_date", "Start", value=date.today()),
             ui.input_date("end_date", "End", value=date.today()),
         ),
@@ -494,10 +494,12 @@ def server(input, output, session):
             status_msg.set(f"[INFO] Fetching data for {inst}...")
 
             if mode == "intraday":
+                status_msg.set(f"[INFO] Fetching intraday data for {inst} ({interval})...")
                 raw_df = fetch_intraday_data(
                     inst, token.get(), interval=interval, mode="intraday"
                 )
-            else:
+            elif mode == "date_range":
+                status_msg.set(f"[INFO] Fetching {interval} data for {inst} from {start} to {end}...")
                 start_val = input.start_date()
                 end_val = input.end_date()
                 # Accept date object or string; normalize to YYYY-MM-DD
@@ -520,6 +522,83 @@ def server(input, output, session):
                 raw_df = fetch_intraday_data(
                     inst, token.get(), interval=interval, mode="date_range", start=start, end=end
                 )
+            elif mode == "expired":
+                # Use the selected expiry from the expiry_selector and the start/end dates
+                start_val = input.start_date()
+                end_val = input.end_date()
+                expiry_val = None
+                try:
+                    expiry_val = input.select_expiry()
+                except Exception:
+                    expiry_val = None
+
+                from datetime import date as _date, datetime as _dt
+                def _as_iso(d):
+                    if isinstance(d, (_date, _dt)):
+                        return d.strftime("%Y-%m-%d")
+                    if d is None:
+                        return None
+                    s = str(d).strip()
+                    return s
+
+                start = _as_iso(start_val)
+                end = _as_iso(end_val)
+
+                if not start or not end:
+                    status_msg.set("[ERROR] Please provide start and end dates")
+                    return
+
+                if not expiry_val:
+                    status_msg.set("[ERROR] Please choose an expiry date (used for expired instruments)")
+                    return
+
+                # Pass expiry as ISO (YYYY-MM-DD); the fetcher will convert to DD-MM-YYYY for the URL
+                expiry_iso = _as_iso(expiry_val)
+
+                # Ensure we have a valid base instrument key (e.g., 'NSE_FO|49792').
+                # If the user provided a manual 'instrument' that already contains an expiry
+                # part (e.g., 'NSE_FO|49792|23-12-2025'), split it; otherwise try to derive
+                # the base key from selected instrumentation state.
+                base_inst = inst
+                # If instrument string includes two pipes, it likely contains an expiry suffix
+                if base_inst and base_inst.count('|') >= 2:
+                    parts = base_inst.split('|')
+                    # base = first two parts (e.g., NSE_FO|49792)
+                    base_inst = '|'.join(parts[:2])
+                    print(f"[DEBUG] Stripped expiry from instrument input, base_inst={base_inst}")
+                # If instrument looks like a symbol rather than a key, try selected_instrument_key
+                if not base_inst or '|' not in base_inst:
+                    candidate = selected_instrument_key.get()
+                    if candidate:
+                        base_inst = candidate
+                        print(f"[DEBUG] Using selected_instrument_key as base_inst: {base_inst}")
+                    else:
+                        # Try to build base key from symbol/strike/expiry/type
+                        symbol = selected_symbol.get() or input.select_symbol() if 'select_symbol' in dir(input) else None
+                        strike_val = selected_strike.get() or (input.select_strike() if 'select_strike' in dir(input) else None)
+                        instr_type = input.select_type() if 'select_type' in dir(input) else None
+                        try:
+                            if symbol and expiry_iso and instr_type:
+                                strike_num = int(strike_val) if strike_val not in (None, "") else None
+                                candidate_key = instrument_manager.get_instrument_key(symbol, expiry_iso, strike_num, instr_type)
+                                if candidate_key:
+                                    base_inst = candidate_key
+                                    print(f"[DEBUG] Derived base_inst via InstrumentManager: {base_inst}")
+                        except Exception as e:
+                            print(f"[WARN] Could not derive base inst: {e}")
+
+                if not base_inst or '|' not in base_inst:
+                    status_msg.set("[ERROR] Could not determine base instrument key for expired fetch. Please Apply selection or enter a valid 'Instrument Key'.")
+                    return
+
+                status_msg.set(f"[INFO] Fetching expired-instrument data for {base_inst} expiry={expiry_iso} from {start} to {end}...")
+
+                raw_df = fetch_intraday_data(
+                    base_inst, token.get(), interval=interval, mode="expired", start=start, end=end, expiry_for_expired=expiry_iso
+                )
+            else:
+                status_msg.set(f"[ERROR] Unsupported fetch mode: {mode}")
+                return
 
             if raw_df is None or raw_df.empty:
                 status_msg.set("[ERROR] No data returned from API")

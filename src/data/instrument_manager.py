@@ -451,7 +451,50 @@ class InstrumentManager:
             import traceback
             traceback.print_exc()
             return None
-    
+
+    def format_expired_instrument_code(self, base_instrument_key: str, expiry_iso: str) -> Optional[str]:
+        """Return an expired-instrument code like 'NSE_FO|57021|23-12-2025' given a base key and expiry in YYYY-MM-DD or DD-MM-YYYY.
+        Returns None when base_instrument_key is falsy.
+        """
+        if not base_instrument_key:
+            return None
+        try:
+            from datetime import datetime as _dt
+            # Try parse ISO YYYY-MM-DD first
+            try:
+                dt = _dt.strptime(str(expiry_iso), "%Y-%m-%d")
+                expiry_str = dt.strftime("%d-%m-%Y")
+            except Exception:
+                # Try DD-MM-YYYY
+                try:
+                    dt = _dt.strptime(str(expiry_iso), "%d-%m-%Y")
+                    expiry_str = dt.strftime("%d-%m-%Y")
+                except Exception:
+                    expiry_str = str(expiry_iso)
+            return f"{base_instrument_key}|{expiry_str}"
+        except Exception as e:
+            print(f"[WARN] format_expired_instrument_code error: {e}")
+            return f"{base_instrument_key}|{expiry_iso}"
+
+    def get_expired_instrument_code_from_selection(
+        self,
+        symbol: str = None,
+        expiry: str = None,
+        strike: Optional[int] = None,
+        instrument_type: str = 'CE'
+    ) -> Optional[str]:
+        """Convenience method: find base instrument key for selection and return formatted expired code.
+        Returns None if no matching base instrument key was found.
+        """
+        try:
+            base_key = self.get_instrument_key(symbol, expiry, strike, instrument_type)
+            if not base_key:
+                return None
+            return self.format_expired_instrument_code(base_key, expiry)
+        except Exception as e:
+            print(f"[ERROR] get_expired_instrument_code_from_selection error: {e}")
+            return None
+
     def clear_cache(self):
         """Clear cache"""
         try:
