@@ -39,7 +39,7 @@ class TokenManager:
         }
         with open(self.token_file, "w") as f:
             json.dump(data, f, indent=2)
-        print(f"✅ Token saved. Expires at: {expiry}")
+        print(f"[OK] Token saved. Expires at: {expiry}")
 
     def load_token(self):
         """
@@ -59,17 +59,17 @@ class TokenManager:
             
             expiry = datetime.fromisoformat(data["expires_at"])
             if datetime.now() < expiry:
-                print(f"✅ Using cached token. Expires at: {expiry}")
+                print(f"[OK] Using cached token. Expires at: {expiry}")
                 return data["access_token"]
             else:
-                print("⏳ Cached token expired.")
+                print("[INFO] Cached token expired.")
                 return None
         except Exception as e:
-            print(f"⚠️ Error loading token: {e}")
+            print(f"[ERROR] Error loading token: {e}")
             return None
 
     def clear_token(self):
         """Delete cached token."""
         if self.token_file.exists():
             self.token_file.unlink()
-            print("🗑️ Token cache cleared.")
+            print("[OK] Token cache cleared.")

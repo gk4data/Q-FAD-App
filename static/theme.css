@@ -1,0 +1,433 @@
+/* ============================================
+   Q-FAD Trading App - Professional Minimalistic Theme
+   Modern Dark Mode with Glassmorphism Effects
+   ============================================ */
+
+:root {
+  --primary: #0066ff;
+  --primary-light: #3d7ff0;
+  --secondary: #0f0f1a;
+  --tertiary: #0d0d16;
+  --accent: #00d4ff;
+  --success: #00c896;
+  --danger: #ff4757;
+  --warning: #ffa502;
+  --bg-dark: #08080f;
+  --bg-darker: #050509;
+  --text-primary: #e8e9f3;
+  --text-secondary: #a0a0b8;
+  --border-color: #1a1a2e;
+  --glass-bg: rgba(255, 255, 255, 0.03);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background: linear-gradient(135deg, var(--bg-darker) 0%, var(--secondary) 100%);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  height: 100%;
+}
+
+/* ============ PAGE STRUCTURE ============ */
+.page-container {
+  background: transparent;
+  min-height: 100vh;
+  padding: 0;
+  margin: 0;
+}
+
+/* ============ SIDEBAR STYLING ============ */
+.sidebar {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(10px);
+  border-right: 1px solid var(--border-color);
+  padding: 24px 16px !important;
+  overflow-y: auto;
+  max-height: 100vh;
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) transparent;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 3px;
+}
+
+.sidebar h3, .sidebar h4, .sidebar h5 {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 20px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+/* ============ MAIN CONTENT ============ */
+.page-content {
+  background: transparent;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+/* ============ FORM INPUTS ============ */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="date"],
+select,
+textarea {
+  background: var(--glass-bg) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+  border-radius: 8px !important;
+  padding: 10px 12px !important;
+  font-size: 13px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus,
+select:focus,
+textarea:focus {
+  background: rgba(0, 102, 255, 0.1) !important;
+  border-color: var(--primary) !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+}
+
+input[type="text"]::placeholder,
+textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+/* ============ BUTTONS ============ */
+.btn {
+  border-radius: 8px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(0, 102, 255, 0.2);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 102, 255, 0.3);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, var(--success) 0%, #00a870 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(0, 200, 150, 0.2);
+}
+
+.btn-success:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 200, 150, 0.3);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--danger) 0%, #d63447 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(255, 71, 87, 0.2);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 71, 87, 0.3);
+}
+
+.btn-info {
+  background: linear-gradient(135deg, var(--accent) 0%, #00b8d4 100%);
+  color: #000;
+  box-shadow: 0 4px 15px rgba(0, 212, 255, 0.2);
+  font-weight: 700;
+}
+
+.btn-info:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 212, 255, 0.3);
+}
+
+.btn-sm {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ============ CHECKBOXES & RADIOS ============ */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--primary);
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* ============ CARDS & PANELS ============ */
+.card, .panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  margin-bottom: 16px;
+}
+
+/* ============ TEXT & HEADINGS ============ */
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+p {
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+/* ============ STATUS TEXT ============ */
+.output-text-verbatim, .pre {
+  background: rgba(0, 0, 0, 0.3);
+  border-left: 3px solid var(--primary);
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-family: "Monaco", "Courier New", monospace;
+  font-size: 12px;
+  color: var(--accent);
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+/* ============ TABS ============ */
+.nav-tabs {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.nav-tabs .nav-link {
+  color: var(--text-secondary);
+  border-radius: 6px 6px 0 0;
+  border: none;
+  padding: 12px 18px;
+  font-weight: 600;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.nav-tabs .nav-link:hover {
+  color: var(--text-primary);
+  background: var(--glass-bg);
+}
+
+.nav-tabs .nav-link.active {
+  color: var(--accent);
+  background: transparent;
+  border-bottom: 2px solid var(--accent);
+}
+
+.tab-content {
+  padding: 20px 0;
+}
+
+/* ============ TABLES ============ */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+
+thead {
+  background: var(--glass-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+th {
+  color: var(--accent);
+  font-weight: 600;
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+tbody tr:hover {
+  background: rgba(0, 102, 255, 0.05);
+}
+
+/* ============ PLOTLY CHART ============ */
+.plotly-plot {
+  background: var(--glass-bg) !important;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  padding: 16px;
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.js-plotly-plot .plotly-plot {
+  background: transparent !important;
+}
+
+/* ============ GRID LAYOUT ============ */
+.row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.column {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* ============ ALERTS & MESSAGES ============ */
+.alert {
+  padding: 14px 16px;
+  border-radius: 8px;
+  border-left: 4px solid;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.alert-info {
+  background: rgba(0, 102, 255, 0.1);
+  border-color: var(--primary);
+  color: var(--accent);
+}
+
+.alert-success {
+  background: rgba(0, 200, 150, 0.1);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.alert-danger {
+  background: rgba(255, 71, 87, 0.1);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.alert-warning {
+  background: rgba(255, 165, 2, 0.1);
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+/* ============ SCROLLBAR STYLING ============ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-height: none;
+    z-index: 1000;
+  }
+
+  .page-content {
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .row {
+    flex-direction: column;
+  }
+
+  .column {
+    width: 100%;
+  }
+}
