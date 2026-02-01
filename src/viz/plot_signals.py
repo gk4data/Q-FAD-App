@@ -16,7 +16,7 @@ def plot_signals(df):
         # Don't force timezone conversions here - preserve timestamps exactly as provided by API
         try:
             # Use numpy array of Python datetimes for Plotly; this keeps hover rendering as Plotly default
-            x_vals = np.asarray(df['Date'].dt.to_pydatetime(), dtype=object)
+            x_vals = np.array(df['Date'].dt.to_pydatetime(), dtype=object)
         except Exception:
             # fallback to strings to avoid numeric hover display
             x_vals = df['Date'].astype(str)
@@ -52,7 +52,7 @@ def plot_signals(df):
                 x=x_vals[df['Buy_Signal']],
                 y=df['Low'][df['Buy_Signal']],  
                 mode='markers',
-                marker=dict(color='Black', size=14, symbol='triangle-up'),
+                marker=dict(color="#030604", size=14, symbol='triangle-up'),
                 name="Buy Signal",
                 hovertemplate='<b>Buy Signal</b><br>%{x|%Y-%m-%d %H:%M:%S}<extra></extra>'
             ),
@@ -301,13 +301,19 @@ def plot_signals(df):
             row=5, col=1
         )
 
-    fig.add_hline(y=80, line=dict(color='black', dash='dash'), row=5, col=1)
-    fig.add_hline(y=20, line=dict(color='black', dash='dash'), row=5, col=1)
+    fig.add_hline(y=80, line=dict(color='#666', dash='dash', width=1), row=5, col=1)
+    fig.add_hline(y=20, line=dict(color='#666', dash='dash', width=1), row=5, col=1)
 
-    # ===== Layout =====
+    # ===== Layout - Professional Light-Gray Theme =====
     fig.update_layout(
-        title="Q-FAD Algo HFT Trading",
-        xaxis_title="Date",
+        title=dict(
+            text="<b>Q-FAD Algo HFT Trading</b>",
+            font=dict(size=20, color="#1a1a1a", family="Arial Black"),
+            x=0.5,
+            xanchor="center"
+        ),
+        xaxis_title="Date & Time",
+        yaxis_title="Price",
         showlegend=True,
         legend=dict(
             orientation="v",
@@ -315,20 +321,48 @@ def plot_signals(df):
             y=0.99,
             xanchor="right",
             x=0.99,
-            font=dict(size=9),
-            bgcolor="rgba(255, 255, 255, 0.7)",
-            bordercolor="rgba(0, 0, 0, 0.2)",
-            borderwidth=1
+            font=dict(size=10, color="#1a1a1a"),
+            bgcolor="rgba(240, 240, 245, 0.9)",
+            bordercolor="#ccccdd",
+            borderwidth=1,
+            tracegroupgap=5
         ),
         xaxis_rangeslider_visible=False,
-        height=1200,
+        height=1600,
         width=1800,
         hovermode='closest',
-        margin=dict(l=50, r=50, t=80, b=50)
+        margin=dict(l=50, r=50, t=80, b=50),
+        plot_bgcolor="#f5f5f9",
+        paper_bgcolor="#e8e8f0",
+        font=dict(color="#1a1a1a", family="Arial", size=11),
     )
 
-    # Ensure x axis is treated as dates and format tick/hover
-    fig.update_xaxes(type='date', tickformat='%Y-%m-%d %H:%M:%S')
+    # Update axes styling
+    fig.update_xaxes(
+        type='date',
+        tickformat='%Y-%m-%d %H:%M',
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="#d0d0dd",
+        showline=True,
+        linewidth=1,
+        linecolor="#a0a0b8",
+        zeroline=False,
+        tickfont=dict(color="#4a4a5e", size=10),
+        title_font=dict(color="#1a1a1a", size=12)
+    )
+
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="#d0d0dd",
+        showline=True,
+        linewidth=1,
+        linecolor="#a0a0b8",
+        zeroline=False,
+        tickfont=dict(color="#4a4a5e", size=10),
+        title_font=dict(color="#1a1a1a", size=12)
+    )
 
     # Leave hover formatting to Plotly defaults so the hover shows date and time exactly as provided by the data
 
