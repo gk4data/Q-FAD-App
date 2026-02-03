@@ -27,8 +27,8 @@ def plot_signals(df):
     fig = make_subplots(
         rows=5, cols=1, 
         shared_xaxes=True, 
-        row_heights=[0.5, 0.15, 0.2, 0.2, 0.2],
-        vertical_spacing=0.05, 
+        row_heights=[0.45, 0.12, 0.15, 0.14, 0.14],
+        vertical_spacing=0.08, 
         subplot_titles=("Candlesticks", "Volume", "Adaptive RSI & MFI", "Strength", "Stochastic & BBMAngle")
     )
 
@@ -318,20 +318,20 @@ def plot_signals(df):
         legend=dict(
             orientation="v",
             yanchor="top",
-            y=0.99,
-            xanchor="right",
-            x=0.99,
-            font=dict(size=10, color="#1a1a1a"),
-            bgcolor="rgba(240, 240, 245, 0.9)",
+            y=0.98,
+            xanchor="left",
+            x=1.01,
+            font=dict(size=9, color="#1a1a1a"),
+            bgcolor="rgba(240, 240, 245, 0.95)",
             bordercolor="#ccccdd",
             borderwidth=1,
-            tracegroupgap=5
+            tracegroupgap=3
         ),
         xaxis_rangeslider_visible=False,
-        height=1600,
-        width=1800,
+        height=1400,
+        width=2000,
         hovermode='closest',
-        margin=dict(l=50, r=50, t=80, b=50),
+        margin=dict(l=50, r=280, t=80, b=50),
         plot_bgcolor="#f5f5f9",
         paper_bgcolor="#e8e8f0",
         font=dict(color="#1a1a1a", family="Arial", size=11),
