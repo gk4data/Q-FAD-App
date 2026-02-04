@@ -4,56 +4,67 @@ from datetime import datetime, timedelta
 
 BASE = "https://api.upstox.com/v2"
 
-def get_market_holidays(year: int = None) -> list:
+def is_market_holiday(date_str: str) -> bool:
     """
-    Fetch market holidays from Upstox API to determine non-trading days.
-    Returns a list of holiday dates in YYYY-MM-DD format.
+    Check if a specific date is a market holiday using Upstox date-based API.
+    date_str should be in YYYY-MM-DD format.
+    Returns True if it's a holiday, False otherwise.
     """
-    if year is None:
-        year = datetime.now().year
-    
-    url = f"{BASE}/market-holidays?year={year}"
+    url = f"{BASE}/market/holidays/{date_str}"
     headers = {"Accept": "application/json"}
     
     try:
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json().get("data", {})
-        holidays = data.get("holidays", [])
-        # Extract dates from holiday list
-        holiday_dates = [h.get("date") for h in holidays if "date" in h]
-        return holiday_dates
+        # If API returns data about the date, it's likely a holiday
+        if data:
+            return True
+        return False
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            # 404 means it's not a holiday (not found in holidays list)
+            return False
+        print(f"[WARN] Could not check market holiday for {date_str}: {e}")
+        return False
     except Exception as e:
-        print(f"[WARN] Could not fetch market holidays: {e}. Using fallback logic.")
-        return []
+        print(f"[WARN] Could not fetch market holiday info for {date_str}: {e}")
+        return False
 
 def get_previous_market_day(target_date_str: str) -> str:
     """
     Get the previous market day (excluding weekends and holidays) for a given date.
     target_date_str should be in YYYY-MM-DD format.
+    Uses Upstox API to check if dates are holidays.
     Returns the previous market day in YYYY-MM-DD format.
     """
     target_date = datetime.strptime(target_date_str, "%Y-%m-%d")
-    holidays = get_market_holidays(target_date.year)
-    
     prev_date = target_date - timedelta(days=1)
     
     # Go back until we find a weekday that's not a holiday
-    max_iterations = 30  # Prevent infinite loop
+    max_iterations = 30  # Prevent infinite loop (roughly 1 month)
     iterations = 0
     
     while iterations < max_iterations:
         # Check if it's a weekend (Saturday=5, Sunday=6)
         if prev_date.weekday() < 5:  # Monday-Friday
             prev_date_str = prev_date.strftime("%Y-%m-%d")
-            if prev_date_str not in holidays:
+            # Check if it's a holiday using the API
+            if not is_market_holiday(prev_date_str):
+                print(f"[INFO] Found previous market day: {prev_date_str}")
                 return prev_date_str
+            else:
+                print(f"[DEBUG] {prev_date_str} is a market holiday, checking earlier...")
+        else:
+            print(f"[DEBUG] {prev_date.strftime('%Y-%m-%d')} is weekend, checking earlier...")
         
         prev_date -= timedelta(days=1)
         iterations += 1
     
-    # Fallback: return previous day even if it might be a holiday
-    return prev_date.strftime("%Y-%m-%d")
+    # Fallback: return 5 days back as a safe bet
+    fallback_date = (target_date - timedelta(days=5)).strftime("%Y-%m-%d")
+    print(f"[WARN] Could not determine previous market day after {max_iterations} iterations. Using {fallback_date}")
+    return fallback_date
 
 def _normalize_date(date_str: str) -> str:
     """Convert DD-MM-YYYY or YYYY-MM-DD to YYYY-MM-DD"""

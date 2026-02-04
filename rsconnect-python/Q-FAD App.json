@@ -1,0 +1,12 @@
+{
+    "https://api.shinyapps.io": {
+        "server_url": "https://api.shinyapps.io",
+        "filename": "C:\\Users\\GaneshKakade\\Downloads\\Q-FAD App",
+        "app_url": "https://gk4data.shinyapps.io/q-fad_trading_platform/",
+        "app_id": "16582937",
+        "app_guid": null,
+        "title": "Q-FAD Trading Platform",
+        "app_mode": "python-shiny",
+        "app_store_version": 1
+    }
+}
