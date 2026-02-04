@@ -36,20 +36,13 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
         'BBL_Angle_Degree', 'regime', 'BB_trend', 'RSI_pct', 'RSI_hi'
     ]
     _ensure_columns(df, required)
-
-    # index scalars
-    mid_idx = min(75, len(df) - 1)           # you can remove if not used elsewhere
-    last_idx = min(255, len(df) - 1)
-
+    
    # first-row scalars (as you had)
     first_volume_profile = df['volume_profile'].iloc[0]
     first_close = df['Close'].iloc[0]
-    last_close  = df['Close'].iloc[last_idx]
-    last_low  = df['Low'].iloc[last_idx]
     first_open  = df['Open'].iloc[0]
     first_high  = df['High'].iloc[0]
     first_low   = df['Low'].iloc[0]
-    first_vwap  = df['VWAP'].iloc[0]
     first_bbl   = df['BBL'].iloc[0]
     first_bbm   = df['BBM'].iloc[0]
 
@@ -59,20 +52,14 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     idx_t3 = idx_at_or_before(df, '14:00:00')   # check3
 
    # --- values at those checkpoints ---
-    vwap_t1  = df['VWAP'].iloc[idx_t1]
     low_t1   = df['Low'].iloc[idx_t1]
     close_t1 = df['Close'].iloc[idx_t1]
-    bbu_t1   = df['BBU'].iloc[idx_t1]
 
-    vwap_t2  = df['VWAP'].iloc[idx_t2]
     low_t2   = df['Low'].iloc[idx_t2]
     close_t2 = df['Close'].iloc[idx_t2]
-    bbu_t2   = df['BBU'].iloc[idx_t2]
-
-    vwap_t3  = df['VWAP'].iloc[idx_t3]
+ 
     low_t3   = df['Low'].iloc[idx_t3]
     close_t3 = df['Close'].iloc[idx_t3]
-    bbu_t3   = df['BBU'].iloc[idx_t3]
 
    # --- original simple checks you had for "no trade" based on first row ---
     no_trade_at_all_close = (
