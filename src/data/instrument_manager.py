@@ -5,12 +5,15 @@ import requests
 import gzip
 import json
 import pandas as pd
+import logging
 from io import BytesIO
 from datetime import datetime, timedelta
 from typing import List, Optional
 import re
 import os
 import pickle
+
+logger = logging.getLogger(__name__)
 
 
 class InstrumentManager:
@@ -38,19 +41,19 @@ class InstrumentManager:
             is_valid = file_age < timedelta(days=self.CACHE_DURATION_DAYS)
             
             if is_valid:
-                print(f"[OK] Cache is fresh ({file_age.days} days old, valid for {self.CACHE_DURATION_DAYS} days)")
+                logger.info("Cache is fresh (%s days old, valid for %s days)", file_age.days, self.CACHE_DURATION_DAYS)
             else:
-                print(f"[WARN] Cache expired ({file_age.days} days old, max {self.CACHE_DURATION_DAYS})")
+                logger.warning("Cache expired (%s days old, max %s)", file_age.days, self.CACHE_DURATION_DAYS)
             
             return is_valid
         except Exception as e:
-            print(f"[ERROR] Error checking cache: {e}")
+            logger.exception("Error checking cache: %s", e)
             return False
     
     def _load_from_cache(self) -> bool:
         """Load cached data"""
         try:
-            print("[LOAD] Loading from cache...")
+            logger.info("Loading from cache...")
             with open(self.CACHE_FILE, 'rb') as f:
                 cached_data = pickle.load(f)
             
@@ -59,13 +62,13 @@ class InstrumentManager:
             self.nifty_df = cached_data.get('nifty_df')
             self.cache_timestamp = cached_data.get('timestamp')
             
-            print(f"[OK] Loaded from cache (cached at: {self.cache_timestamp})")
-            print(f"   Total FnO: {len(self.fno_df) if self.fno_df is not None else 0}")
-            print(f"   Popular symbols: {len(self.nifty_df) if self.nifty_df is not None else 0}")
+            logger.info("Loaded from cache (cached at: %s)", self.cache_timestamp)
+            logger.info("Total FnO: %s", len(self.fno_df) if self.fno_df is not None else 0)
+            logger.info("Popular symbols: %s", len(self.nifty_df) if self.nifty_df is not None else 0)
             
             return True
         except Exception as e:
-            print(f"[ERROR] Error loading cache: {e}")
+            logger.exception("Error loading cache: %s", e)
             return False
     
     def _save_to_cache(self):
@@ -81,9 +84,9 @@ class InstrumentManager:
             with open(self.CACHE_FILE, 'wb') as f:
                 pickle.dump(cache_data, f)
             
-            print(f"[OK] Saved to cache: {self.CACHE_FILE}")
+            logger.info("Saved to cache: %s", self.CACHE_FILE)
         except Exception as e:
-            print(f"[ERROR] Error saving cache: {e}")
+            logger.exception("Error saving cache: %s", e)
     
     def _convert_expiry_to_date(self, expiry_val) -> str:
         """Convert expiry to readable date format YYYY-MM-DD"""
@@ -129,7 +132,7 @@ class InstrumentManager:
             # If all else fails, return original string
             return expiry_str
         except Exception as e:
-            print(f"[WARN] Error converting expiry: {e}")
+            logger.warning("Error converting expiry: %s", e)
             return str(expiry_val)
 
     def load_from_excel(self, file_path: str) -> bool:
@@ -139,14 +142,14 @@ class InstrumentManager:
         if not os.path.exists(file_path):
             return False
         try:
-            print(f"[LOAD] Loading instruments from local file: {file_path}")
+            logger.info("Loading instruments from local file: %s", file_path)
             if str(file_path).lower().endswith(('.xlsx', '.xls')):
                 df_full = pd.read_excel(file_path, engine='openpyxl')
             else:
                 df_full = pd.read_csv(file_path)
 
             if df_full is None or df_full.empty:
-                print("[ERROR] Local file empty")
+                logger.error("Local file empty")
                 return False
 
             self.df = df_full.copy()
@@ -165,11 +168,11 @@ class InstrumentManager:
             self.nifty_df = self.fno_df
 
             self.source = 'local'
-            print(f"[OK] Local instruments loaded: {len(self.fno_df)} rows")
+            logger.info("Local instruments loaded: %s rows", len(self.fno_df))
             self._save_to_cache()
             return True
         except Exception as e:
-            print(f"[ERROR] Error loading local file: {e}")
+            logger.exception("Error loading local file: %s", e)
             import traceback
             traceback.print_exc()
             return False
@@ -187,32 +190,24 @@ class InstrumentManager:
         if prefer_local and os.path.exists(local_file):
             loaded = self.load_from_excel(local_file)
             if loaded:
-                print("[OK] Instruments loaded from local file (preferred)")
+                logger.info("Instruments loaded from local file (preferred)")
                 return True
             else:
-                print("[WARN] Preferred local file present but failed to load — falling back to cache/API")
+                logger.warning("Preferred local file present but failed to load — falling back to cache/API")
 
-        # If local file exists and preference not explicit, keep previous behavior: prefer local unless force_refresh
-        if os.path.exists(local_file) and not force_refresh and not prefer_local:
-            loaded = self.load_from_excel(local_file)
-            if loaded:
-                print("[INFO] Instruments loaded from local file")
-                return True
+        # Do not auto-use local file unless explicitly requested
 
         # Try cache first (unless forced to refresh)
         if not force_refresh and self._is_cache_valid():
             if self._load_from_cache():
                 return True
-        if not force_refresh and self._is_cache_valid():
-            if self._load_from_cache():
-                return True
         
         try:
-            print("[LOAD] Fetching instruments from Upstox...")
+            logger.info("Fetching instruments from Upstox...")
             response = requests.get(self.NSE_INSTRUMENTS_URL, timeout=60)
             response.raise_for_status()
             
-            print("[DECOMPRESS] Decompressing...")
+            logger.info("Decompressing...")
             with gzip.GzipFile(fileobj=BytesIO(response.content)) as gz:
                 raw_data = json.loads(gz.read().decode('utf-8'))
             
@@ -222,44 +217,44 @@ class InstrumentManager:
             elif isinstance(raw_data, dict) and 'data' in raw_data:
                 instruments = raw_data['data']
             else:
-                print("[ERROR] Unexpected data structure")
+                logger.error("Unexpected data structure")
                 return False
             
-            print(f"[OK] Downloaded {len(instruments)} instruments")
+            logger.info("Downloaded %s instruments", len(instruments))
             
             # Convert to DataFrame
-            print("[LOAD] Loading data...")
+            logger.info("Loading data...")
             df_full = pd.DataFrame(instruments)
             
-            print(f"   Full columns: {len(df_full.columns)}")
+            logger.info("Full columns: %s", len(df_full.columns))
             
             # Filter 1: Keep only required columns
-            print("[FILTER] Keeping only required columns...")
+            logger.info("Keeping only required columns...")
             available_cols = [col for col in self.REQUIRED_COLUMNS if col in df_full.columns]
             
             if len(available_cols) < 3:
-                print(f"[ERROR] Missing critical columns")
-                print(f"   Available: {list(df_full.columns)}")
+                logger.error("Missing critical columns")
+                logger.error("Available: %s", list(df_full.columns))
                 return False
             
             self.df = df_full[available_cols].copy()
             
             # FIX: Convert expiry to readable date format
-            print("[INFO] Converting expiry dates to readable format...")
+            logger.info("Converting expiry dates to readable format...")
             if 'expiry' in self.df.columns:
                 self.df['expiry'] = self.df['expiry'].apply(self._convert_expiry_to_date)
-                print(f"   Sample expiries: {self.df['expiry'].unique()[:5]}")
+                logger.info("Sample expiries: %s", self.df['expiry'].unique()[:5])
             
             # Filter 2: Keep only FnO (CE, PE, FUT)
-            print("[FILTER] FnO instruments (CE, PE, FUT)...")
+            logger.info("FnO instruments (CE, PE, FUT)...")
             self.fno_df = self.df[
                 (self.df['instrument_type'].astype(str).str.strip().isin(['CE', 'PE', 'FUT']))
             ].copy()
             
-            print(f"   [OK] FnO count: {len(self.fno_df)}")
+            logger.info("FnO count: %s", len(self.fno_df))
             
             # Filter 3: Keep NIFTY, BANKNIFTY, FINNIFTY, etc.
-            print("[FILTER] Popular symbols...")
+            logger.info("Popular symbols...")
             popular_symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50']
             
             self.nifty_df = self.fno_df[
@@ -268,19 +263,18 @@ class InstrumentManager:
                 )
             ].copy()
             
-            print(f"   [OK] Popular symbols count: {len(self.nifty_df)}")
+            logger.info("Popular symbols count: %s", len(self.nifty_df))
             
             # Show statistics
-            print("\n[STATS] Summary:")
-            print(f"   Total downloaded: {len(df_full)}")
-            print(f"   After FnO filter: {len(self.fno_df)}")
-            print(f"   After symbol filter: {len(self.nifty_df)}")
-            print(f"   Memory used: ~{self.nifty_df.memory_usage(deep=True).sum() / (1024*1024):.1f} MB")
+            logger.info("Summary:")
+            logger.info("Total downloaded: %s", len(df_full))
+            logger.info("After FnO filter: %s", len(self.fno_df))
+            logger.info("After symbol filter: %s", len(self.nifty_df))
+            logger.info("Memory used: ~%.1f MB", self.nifty_df.memory_usage(deep=True).sum() / (1024*1024))
             
             # Show sample
             if len(self.nifty_df) > 0:
-                print("\n[SAMPLE] Sample instruments:")
-                print(self.nifty_df.head(3)[['name', 'instrument_type', 'expiry', 'strike_price']].to_string())
+                logger.info("Sample instruments:\n%s", self.nifty_df.head(3)[['name', 'instrument_type', 'expiry', 'strike_price']].to_string())
             
             # Mark source and save to cache
             self.source = 'api'
@@ -290,7 +284,7 @@ class InstrumentManager:
             return True
         
         except Exception as e:
-            print(f"[ERROR] Error: {e}")
+            logger.exception("Error: %s", e)
             import traceback
             traceback.print_exc()
             return False
@@ -304,15 +298,15 @@ class InstrumentManager:
             df = self.nifty_df
 
         if df is None or df.empty:
-            print("[ERROR] No data loaded")
+            logger.error("No data loaded")
             return []
 
         try:
             symbols = sorted(df['name'].dropna().unique().tolist())
-            print(f"[OK] Found {len(symbols)} unique symbols: {symbols[:10]}...")
+            logger.info("Found %s unique symbols: %s...", len(symbols), symbols[:10])
             return symbols
         except Exception as e:
-            print(f"[ERROR] Error in get_unique_symbols: {e}")
+            logger.exception("Error in get_unique_symbols: %s", e)
             return []
     
     def get_expiry_dates(self, symbol: Optional[str] = None) -> List[str]:
@@ -324,7 +318,7 @@ class InstrumentManager:
             df = self.nifty_df
 
         if df is None or df.empty:
-            print("[WARN] No data loaded")
+            logger.warning("No data loaded")
             return []
 
         try:
@@ -335,17 +329,17 @@ class InstrumentManager:
                 ]
 
             if df_filtered.empty:
-                print(f"[WARN] No instruments for symbol: {symbol}")
+                logger.warning("No instruments for symbol: %s", symbol)
                 return []
 
             expiries_raw = df_filtered['expiry'].dropna().unique().tolist()
             # Normalize expiries to YYYY-MM-DD
             expiries = sorted(list({self._convert_expiry_to_date(x) for x in expiries_raw if x is not None and str(x).strip() != ''}))
-            print(f"[OK] Found {len(expiries)} expiry dates for {symbol or 'all symbols'}: {expiries[:5]}...")
+            logger.info("Found %s expiry dates for %s: %s...", len(expiries), symbol or 'all symbols', expiries[:5])
             return expiries
 
         except Exception as e:
-            print(f"[ERROR] Error in get_expiry_dates: {e}")
+            logger.exception("Error in get_expiry_dates: %s", e)
             import traceback
             traceback.print_exc()
             return []
@@ -359,7 +353,7 @@ class InstrumentManager:
             df = self.nifty_df
 
         if df is None or df.empty or not symbol or not expiry:
-            print(f"[WARN] Missing parameters: symbol={symbol}, expiry={expiry}")
+            logger.warning("Missing parameters: symbol=%s, expiry=%s", symbol, expiry)
             return []
 
         try:
@@ -371,17 +365,17 @@ class InstrumentManager:
                 expiry_s = self._convert_expiry_to_date(expiry)
                 df_filtered = df_filtered[df_filtered['expiry'].apply(lambda x: self._convert_expiry_to_date(x)) == expiry_s]
 
-            print(f"[DEBUG] Filtered to {len(df_filtered)} rows for {symbol} {expiry}")
+            logger.debug("Filtered to %s rows for %s %s", len(df_filtered), symbol, expiry)
 
             # Filter by type if specified
             if instrument_type:
                 df_filtered = df_filtered[
                     df_filtered['instrument_type'].astype(str).str.strip() == instrument_type
                 ]
-                print(f"   After type filter ({instrument_type}): {len(df_filtered)} rows")
+                logger.debug("After type filter (%s): %s rows", instrument_type, len(df_filtered))
 
             if df_filtered.empty:
-                print(f"[WARN] No strikes found for {symbol} {expiry} {instrument_type}")
+                logger.warning("No strikes found for %s %s %s", symbol, expiry, instrument_type)
                 return []
 
             # FUT instruments typically have no strike prices
@@ -392,11 +386,11 @@ class InstrumentManager:
                 [int(float(s)) for s in df_filtered['strike_price'].dropna().unique() if s is not None and s != '']
             )
 
-            print(f"[OK] Found {len(strikes)} strikes: {strikes[:10]}...")
+            logger.info("Found %s strikes: %s...", len(strikes), strikes[:10])
             return strikes
 
         except Exception as e:
-            print(f"[ERROR] Error in get_strikes: {e}")
+            logger.exception("Error in get_strikes: %s", e)
             import traceback
             traceback.print_exc()
             return []

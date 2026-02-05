@@ -4,9 +4,35 @@ from shiny import ui
 from shinywidgets import output_widget
 
 
-def create_app_ui():
-    """Create the main UI layout for the Q-FAD Trading Application."""
-    
+def create_auth_ui():
+    return ui.div(
+        ui.div(
+            ui.h2("⚡ Q-FAD", style="text-align: center; margin-bottom: 8px;"),
+            ui.p("Algorithmic HFT Platform", style="text-align: center; color: #858585; font-size: 11px; margin-bottom: 24px; letter-spacing: 1px;"),
+            style="margin-bottom: 20px;"
+        ),
+        ui.div(
+            ui.h4("🔐 Authentication", style="display: flex; align-items: center; gap: 8px;"),
+            ui.output_text_verbatim("auth_status"),
+            ui.input_action_button("show_login", "🔑 Show Login URL", class_="btn-primary", style="width: 100%; margin-bottom: 8px;"),
+            ui.output_ui("login_url_display"),
+            ui.input_text("auth_code", "Authorization Code", placeholder="Paste your auth code here"),
+            ui.row(
+                ui.column(6, ui.input_action_button("do_auth", "✓ Submit", class_="btn-success")),
+                ui.column(6, ui.input_action_button("clear_cache", "✗ Logout", class_="btn-danger")),
+            ),
+            style="margin-bottom: 24px;"
+        ),
+        ui.div(
+            ui.h5("📡 SYSTEM STATUS", style="font-size: 11px; margin-bottom: 8px;"),
+            ui.output_text_verbatim("status"),
+            style="margin-top: 16px;"
+        ),
+        style="max-width: 520px; margin: 40px auto;"
+    )
+
+
+def create_main_ui():
     return ui.page_sidebar(
         ui.sidebar(
             ui.div(
@@ -14,20 +40,6 @@ def create_app_ui():
                 ui.p("Algorithmic HFT Platform", style="text-align: center; color: #858585; font-size: 11px; margin-bottom: 24px; letter-spacing: 1px;"),
                 style="margin-bottom: 20px;"
             ),
-            
-            ui.div(
-                ui.h4("🔐 Authentication", style="display: flex; align-items: center; gap: 8px;"),
-                ui.output_text_verbatim("auth_status"),
-                ui.input_action_button("show_login", "🔑 Show Login URL", class_="btn-primary", style="width: 100%; margin-bottom: 8px;"),
-                ui.output_ui("login_url_display"),
-                ui.input_text("auth_code", "Authorization Code", placeholder="Paste your auth code here"),
-                ui.row(
-                    ui.column(6, ui.input_action_button("do_auth", "✓ Submit", class_="btn-success")),
-                    ui.column(6, ui.input_action_button("clear_cache", "✗ Logout", class_="btn-danger")),
-                ),
-                style="margin-bottom: 24px;"
-            ),
-            ui.tags.hr(),
 
             # Instrument Selector Section
             ui.div(
@@ -42,7 +54,6 @@ def create_app_ui():
                         ui.input_checkbox("auto_load_instruments", "Auto-load", value=True)
                     ),
                 ),
-                ui.input_checkbox("use_local_instruments", "Use local file", value=True),
                 ui.output_text_verbatim("instruments_status"),
                 style="margin-bottom: 24px;"
             ),
@@ -145,6 +156,15 @@ def create_app_ui():
                 )
             ),
         ),
+        title="⚡ Q-FAD: Algorithmic Trading Platform",
+        fillable=True
+    )
+
+
+def create_app_ui():
+    """Create the main UI layout for the Q-FAD Trading Application."""
+
+    return ui.page_fluid(
         ui.tags.head(
             ui.tags.link(rel="stylesheet", href="static/theme.css"),
             ui.tags.title("Q-FAD Algo - HFT Trading Platform"),
@@ -201,6 +221,7 @@ def create_app_ui():
                 }
             """)
         ),
+        ui.output_ui("app_root"),
         title="⚡ Q-FAD: Algorithmic Trading Platform",
         fillable=True
     )

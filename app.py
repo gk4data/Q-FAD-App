@@ -2,6 +2,7 @@
 # Clean main entry point with UI and Server separation
 
 import os
+import logging
 from shiny import App
 
 from ui import create_app_ui
@@ -10,6 +11,10 @@ from server import define_server
 
 def main():
     """Initialize and run the Q-FAD Trading Application."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(levelname)s] %(name)s: %(message)s"
+    )
     app_ui = create_app_ui()
     
     app = App(

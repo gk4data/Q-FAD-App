@@ -1,5 +1,6 @@
 # server.py - Server logic for Q-FAD Trading App
 import os
+import logging
 import traceback
 import pandas as pd
 import numpy as np
@@ -8,6 +9,8 @@ from datetime import date as _date, datetime as _dt
 from shiny import render, reactive, ui
 from shinywidgets import render_plotly
 import plotly.graph_objects as go
+
+logger = logging.getLogger(__name__)
 
 # Project imports
 from src.clients.upstox_client import UpstoxClient
@@ -24,6 +27,7 @@ from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
 from src.viz.plot_signals import plot_signals
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
+from ui import create_auth_ui, create_main_ui
 
 # Utility function to get next Tuesday
 def get_next_tuesday():
@@ -62,6 +66,7 @@ def define_server(input, output, session):
     selected_strike = reactive.Value(None)
     selected_instrument_key = reactive.Value(None)
 
+
     # ===== Utility Functions =====
     def _as_iso(d):
         """Convert date/datetime to ISO format (YYYY-MM-DD)."""
@@ -85,17 +90,19 @@ def define_server(input, output, session):
     @reactive.effect
     def _auto_load_instruments():
         """Auto-load instruments on startup if enabled."""
+        if not token.get():
+            return
         if input.auto_load_instruments():
             try:
                 instruments_loaded.set(False)
-                prefer_local = input.use_local_instruments() if 'use_local_instruments' in dir(input) else True
-                if instrument_manager.fetch_instruments(force_refresh=False, prefer_local=prefer_local):
+                if instrument_manager.fetch_instruments(force_refresh=False, prefer_local=False):
                     symbols = instrument_manager.get_unique_symbols()
+                    symbols = [s for s in symbols if str(s).upper() == "NIFTY"]
                     available_symbols.set(symbols)
                     instruments_loaded.set(True)
                     status_msg.set(f"[OK] Instruments auto-loaded: {len(symbols)} symbols")
             except Exception as e:
-                print(f"Auto-load error: {e}")
+                logger.exception("Auto-load error: %s", e)
 
     # ===== Output Renderers =====
     @output
@@ -118,6 +125,13 @@ def define_server(input, output, session):
             return f"[OK] Ready | {len(available_symbols.get())} symbols loaded{src_display}"
         else:
             return "[INFO] Click 'Load Instruments' or enable Auto-load"
+
+    @output
+    @render.ui
+    def app_root():
+        if token.get():
+            return create_main_ui()
+        return create_auth_ui()
 
     # ===== Authentication Events =====
     @reactive.effect
@@ -174,10 +188,10 @@ def define_server(input, output, session):
     def _load_instruments():
         try:
             status_msg.set("[INFO] Loading instruments...")
-            prefer_local = input.use_local_instruments() if 'use_local_instruments' in dir(input) else True
-            loaded = instrument_manager.fetch_instruments(force_refresh=True, prefer_local=prefer_local)
+            loaded = instrument_manager.fetch_instruments(force_refresh=True, prefer_local=False)
             if loaded:
                 symbols = instrument_manager.get_unique_symbols()
+                symbols = [s for s in symbols if str(s).upper() == "NIFTY"]
                 available_symbols.set(symbols)
                 instruments_loaded.set(True)
                 status_msg.set(f"[OK] Loaded {len(symbols)} symbols (source: {getattr(instrument_manager, 'source', 'unknown')})")
@@ -194,29 +208,31 @@ def define_server(input, output, session):
         symbols = available_symbols.get()
         if not symbols:
             return ui.div("Load instruments first", style="color: #999;")
-        print(f"[DEBUG] symbol_selector render: {len(symbols)} symbols, default={symbols[0]}")
+        logger.debug("symbol_selector render: %s symbols, default=%s", len(symbols), symbols[0])
         return ui.input_select("select_symbol", "Choose Symbol", choices=symbols, selected=symbols[0])
 
     @reactive.effect
     def _update_expiries():
+        if not token.get():
+            return
         symbol = input.select_symbol()
-        print(f"[DEBUG] _update_expiries triggered: symbol={symbol}, instruments_loaded={instruments_loaded.get()}")
+        logger.debug("_update_expiries triggered: symbol=%s, instruments_loaded=%s", symbol, instruments_loaded.get())
         if not symbol or not instruments_loaded.get():
             return
         try:
             expiries = instrument_manager.get_expiry_dates(symbol)
-            print(f"[DEBUG] _update_expiries: fetched {len(expiries)} expiries for {symbol}")
+            logger.debug("_update_expiries: fetched %s expiries for %s", len(expiries), symbol)
             available_expiries.set(expiries)
             selected_symbol.set(symbol)
         except Exception as e:
             available_expiries.set([])
-            print(f"[ERROR] Error fetching expiries: {e}")
+            logger.exception("Error fetching expiries: %s", e)
 
     @output
     @render.ui
     def expiry_selector():
         expiries = available_expiries.get()
-        print(f"[DEBUG] expiry_selector render: {len(expiries)} expiries available")
+        logger.debug("expiry_selector render: %s expiries available", len(expiries))
         if not expiries:
             return ui.div("Select symbol first", style="color: #999;")
 
@@ -234,33 +250,34 @@ def define_server(input, output, session):
         min_date = min(expiry_dates)
         max_date = max(expiry_dates)
 
-        print(f"[DEBUG] expiry_selector default (date): {default}")
+        logger.debug("expiry_selector default (date): %s", default)
         return ui.input_date("select_expiry", "Choose Expiry", value=default, min=min_date, max=max_date)
 
     @reactive.effect
     def _update_strikes():
+        if not token.get():
+            return
         symbol = input.select_symbol()
         expiry = input.select_expiry()
         instr_type = input.select_type()
-
-        print(f"[DEBUG] _update_strikes triggered: symbol={symbol}, expiry={expiry}, type={instr_type}")
+        logger.debug("_update_strikes triggered: symbol=%s, expiry=%s, type=%s", symbol, expiry, instr_type)
 
         if instr_type and instr_type.upper() == 'FUT':
             available_strikes.set([])
             selected_expiry.set(expiry)
-            print(f"[DEBUG] FUT selected -> available_strikes cleared")
+            logger.debug("FUT selected -> available_strikes cleared")
             return
 
         if not (symbol and expiry and instruments_loaded.get()):
             return
         try:
             strikes = instrument_manager.get_strikes(symbol, expiry, instr_type)
-            print(f"[DEBUG] _update_strikes: fetched {len(strikes)} strikes")
+            logger.debug("_update_strikes: fetched %s strikes", len(strikes))
             available_strikes.set(strikes)
             selected_expiry.set(expiry)
         except Exception as e:
             available_strikes.set([])
-            print(f"[ERROR] Error fetching strikes: {e}")
+            logger.exception("Error fetching strikes: %s", e)
 
     @output
     @render.ui
@@ -268,7 +285,7 @@ def define_server(input, output, session):
         from shiny import ui
         strikes = available_strikes.get()
         instr_type = input.select_type()
-        print(f"[DEBUG] strike_selector render: instr_type={instr_type}, strikes_count={len(strikes) if strikes else 0}")
+        logger.debug("strike_selector render: instr_type=%s, strikes_count=%s", instr_type, len(strikes) if strikes else 0)
 
         if instr_type and instr_type.upper() == 'FUT':
             return ui.div("Futures selected — no strike required", style="color: #333;")
@@ -306,7 +323,8 @@ def define_server(input, output, session):
                 if not strike_val:
                     status_msg.set("[ERROR] Select Strike for Options")
                     return
-                strike = int(strike_val)
+                strike_clean = str(strike_val).strip().replace(",", "")
+                strike = int(float(strike_clean))
                 key = instrument_manager.get_instrument_key(symbol, expiry, strike, instr_type)
                 strike_display = str(strike)
 
@@ -315,9 +333,9 @@ def define_server(input, output, session):
                 selected_strike.set(strike_val if instr_type != 'FUT' else None)
                 try:
                     ui.update_text("instrument", value=key, session=session)
-                    print(f"[DEBUG] ui.update_text instrument={key}")
+                    logger.debug("ui.update_text instrument=%s", key)
                 except Exception as e:
-                    print(f"[WARN] Could not update input instrument via ui.update_text: {e}")
+                    logger.warning("Could not update input instrument via ui.update_text: %s", e)
                 status_msg.set(f"[OK] Selected: {symbol} {expiry} {strike_display} {instr_type}")
             else:
                 status_msg.set(f"[ERROR] Instrument not found")
@@ -351,11 +369,11 @@ def define_server(input, output, session):
             if current != key:
                 try:
                     ui.update_text("instrument", value=key, session=session)
-                    print(f"[DEBUG] _sync_selected_instrument set instrument={key}")
+                    logger.debug("_sync_selected_instrument set instrument=%s", key)
                 except Exception as e:
-                    print(f"[WARN] Could not update input instrument via ui.update_text in sync: {e}")
+                    logger.warning("Could not update input instrument via ui.update_text in sync: %s", e)
         except Exception as e:
-            print(f"[WARN] _sync_selected_instrument error: {e}")
+            logger.warning("_sync_selected_instrument error: %s", e)
 
     # ===== Data Fetching & Processing =====
     @reactive.effect
@@ -425,12 +443,12 @@ def define_server(input, output, session):
                 if base_inst and base_inst.count('|') >= 2:
                     parts = base_inst.split('|')
                     base_inst = '|'.join(parts[:2])
-                    print(f"[DEBUG] Stripped expiry from instrument input, base_inst={base_inst}")
+                    logger.debug("Stripped expiry from instrument input, base_inst=%s", base_inst)
                 if not base_inst or '|' not in base_inst:
                     candidate = selected_instrument_key.get()
                     if candidate:
                         base_inst = candidate
-                        print(f"[DEBUG] Using selected_instrument_key as base_inst: {base_inst}")
+                        logger.debug("Using selected_instrument_key as base_inst: %s", base_inst)
                     else:
                         symbol = selected_symbol.get() or (input.select_symbol() if 'select_symbol' in dir(input) else None)
                         strike_val = selected_strike.get() or (input.select_strike() if 'select_strike' in dir(input) else None)
@@ -441,9 +459,9 @@ def define_server(input, output, session):
                                 candidate_key = instrument_manager.get_instrument_key(symbol, expiry_iso, strike_num, instr_type)
                                 if candidate_key:
                                     base_inst = candidate_key
-                                    print(f"[DEBUG] Derived base_inst via InstrumentManager: {base_inst}")
+                                    logger.debug("Derived base_inst via InstrumentManager: %s", base_inst)
                         except Exception as e:
-                            print(f"[WARN] Could not derive base inst: {e}")
+                            logger.warning("Could not derive base inst: %s", e)
 
                 if not base_inst or '|' not in base_inst:
                     status_msg.set("[ERROR] Could not determine base instrument key for expired fetch.")
@@ -459,6 +477,12 @@ def define_server(input, output, session):
 
             if raw_df is None or raw_df.empty:
                 status_msg.set("[ERROR] No data returned from API")
+                return
+
+            required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
+            missing_cols = required_cols - set(raw_df.columns)
+            if missing_cols:
+                status_msg.set(f"[ERROR] Missing required data columns: {sorted(missing_cols)}")
                 return
 
             # Determine target date
