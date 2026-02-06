@@ -65,6 +65,7 @@ def define_server(input, output, session):
     selected_expiry = reactive.Value(None)
     selected_strike = reactive.Value(None)
     selected_instrument_key = reactive.Value(None)
+    selected_exchange = reactive.Value("NSE")
 
 
     # ===== Utility Functions =====
@@ -95,12 +96,13 @@ def define_server(input, output, session):
         if input.auto_load_instruments():
             try:
                 instruments_loaded.set(False)
-                if instrument_manager.fetch_instruments(force_refresh=False, prefer_local=False):
+                exchange = input.exchange() if "exchange" in dir(input) else "NSE"
+                if instrument_manager.fetch_instruments(exchange=exchange, force_refresh=False, prefer_local=False):
                     symbols = instrument_manager.get_unique_symbols()
-                    symbols = [s for s in symbols if str(s).upper() == "NIFTY"]
                     available_symbols.set(symbols)
                     instruments_loaded.set(True)
-                    status_msg.set(f"[OK] Instruments auto-loaded: {len(symbols)} symbols")
+                    selected_exchange.set(exchange)
+                    status_msg.set(f"[OK] Instruments auto-loaded: {len(symbols)} symbols ({exchange})")
             except Exception as e:
                 logger.exception("Auto-load error: %s", e)
 
@@ -122,7 +124,7 @@ def define_server(input, output, session):
         if instruments_loaded.get():
             src = getattr(instrument_manager, 'source', None)
             src_display = f" ({src})" if src else ""
-            return f"[OK] Ready | {len(available_symbols.get())} symbols loaded{src_display}"
+            return f"[OK] Ready | {len(available_symbols.get())} symbols loaded{src_display} | {selected_exchange.get()}"
         else:
             return "[INFO] Click 'Load Instruments' or enable Auto-load"
 
@@ -188,18 +190,51 @@ def define_server(input, output, session):
     def _load_instruments():
         try:
             status_msg.set("[INFO] Loading instruments...")
-            loaded = instrument_manager.fetch_instruments(force_refresh=True, prefer_local=False)
+            exchange = input.exchange() if "exchange" in dir(input) else "NSE"
+            loaded = instrument_manager.fetch_instruments(exchange=exchange, force_refresh=True, prefer_local=False)
             if loaded:
                 symbols = instrument_manager.get_unique_symbols()
-                symbols = [s for s in symbols if str(s).upper() == "NIFTY"]
                 available_symbols.set(symbols)
                 instruments_loaded.set(True)
-                status_msg.set(f"[OK] Loaded {len(symbols)} symbols (source: {getattr(instrument_manager, 'source', 'unknown')})")
+                selected_exchange.set(exchange)
+                status_msg.set(f"[OK] Loaded {len(symbols)} symbols ({exchange}) (source: {getattr(instrument_manager, 'source', 'unknown')})")
             else:
                 status_msg.set("[ERROR] Failed to load instruments")
         except Exception as e:
             status_msg.set(f"[ERROR] Error: {e}")
             traceback.print_exc()
+
+    @reactive.effect
+    def _exchange_changed():
+        if not token.get():
+            return
+        exchange = input.exchange() if "exchange" in dir(input) else "NSE"
+        if selected_exchange.get() == exchange and instruments_loaded.get():
+            return
+        available_symbols.set([])
+        available_expiries.set([])
+        available_strikes.set([])
+        selected_symbol.set(None)
+        selected_expiry.set(None)
+        selected_strike.set(None)
+        selected_instrument_key.set(None)
+        instruments_loaded.set(False)
+        selected_exchange.set(exchange)
+
+        try:
+            current = None
+            try:
+                current = input.instrument()
+            except Exception:
+                current = None
+            if exchange == "MCX":
+                if not current or current in ("NSE_FO|40088", "MCX_FO|496920"):
+                    ui.update_text("instrument", value="MCX_FO|496920", session=session)
+            else:
+                if not current or current in ("MCX_FO|496920", "NSE_FO|40088"):
+                    ui.update_text("instrument", value="NSE_FO|40088", session=session)
+        except Exception as e:
+            logger.warning("Could not update instrument placeholder for exchange: %s", e)
 
     @output
     @render.ui

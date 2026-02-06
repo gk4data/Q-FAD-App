@@ -17,10 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 class InstrumentManager:
-    """Ultra-fast instrument manager - NIFTY focused with 1-month cache"""
-    
-    NSE_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
-    CACHE_FILE = "instruments_cache.pkl"
+    """Instrument manager with exchange-aware caching and filters."""
+
+    EXCHANGE_URLS = {
+        "NSE": "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz",
+        "MCX": "https://assets.upstox.com/market-quote/instruments/exchange/MCX.json.gz",
+    }
+    CACHE_FILE_TEMPLATE = "instruments_cache_{exchange}.pkl"
     CACHE_DURATION_DAYS = 30
     REQUIRED_COLUMNS = ['name', 'instrument_type', 'expiry', 'instrument_key', 'strike_price']
     
@@ -28,16 +31,29 @@ class InstrumentManager:
         self.df = None
         self.fno_df = None
         self.nifty_df = None
+        self.focus_df = None
         self.last_fetched = None
         self.cache_timestamp = None
+        self.exchange = "NSE"
+
+    def _normalize_exchange(self, exchange: Optional[str]) -> str:
+        if not exchange:
+            return "NSE"
+        ex = str(exchange).strip().upper()
+        return ex if ex in self.EXCHANGE_URLS else "NSE"
+
+    def _get_cache_file(self, exchange: Optional[str] = None) -> str:
+        ex = self._normalize_exchange(exchange or self.exchange)
+        return self.CACHE_FILE_TEMPLATE.format(exchange=ex)
     
     def _is_cache_valid(self) -> bool:
         """Check if cache file exists and is fresh (<30 days)"""
-        if not os.path.exists(self.CACHE_FILE):
+        cache_file = self._get_cache_file()
+        if not os.path.exists(cache_file):
             return False
         
         try:
-            file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.CACHE_FILE))
+            file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(cache_file))
             is_valid = file_age < timedelta(days=self.CACHE_DURATION_DAYS)
             
             if is_valid:
@@ -52,15 +68,18 @@ class InstrumentManager:
     
     def _load_from_cache(self) -> bool:
         """Load cached data"""
+        cache_file = self._get_cache_file()
         try:
             logger.info("Loading from cache...")
-            with open(self.CACHE_FILE, 'rb') as f:
+            with open(cache_file, 'rb') as f:
                 cached_data = pickle.load(f)
             
             self.df = cached_data.get('df')
             self.fno_df = cached_data.get('fno_df')
             self.nifty_df = cached_data.get('nifty_df')
+            self.focus_df = cached_data.get('focus_df')
             self.cache_timestamp = cached_data.get('timestamp')
+            self.exchange = cached_data.get('exchange', self.exchange)
             
             logger.info("Loaded from cache (cached at: %s)", self.cache_timestamp)
             logger.info("Total FnO: %s", len(self.fno_df) if self.fno_df is not None else 0)
@@ -78,13 +97,16 @@ class InstrumentManager:
                 'df': self.df,
                 'fno_df': self.fno_df,
                 'nifty_df': self.nifty_df,
+                'focus_df': self.focus_df,
                 'timestamp': datetime.now()
             }
-            
-            with open(self.CACHE_FILE, 'wb') as f:
+            cache_data['exchange'] = self.exchange
+
+            cache_file = self._get_cache_file()
+            with open(cache_file, 'wb') as f:
                 pickle.dump(cache_data, f)
-            
-            logger.info("Saved to cache: %s", self.CACHE_FILE)
+
+            logger.info("Saved to cache: %s", cache_file)
         except Exception as e:
             logger.exception("Error saving cache: %s", e)
     
@@ -166,6 +188,7 @@ class InstrumentManager:
 
             # For backward compatibility, keep nifty_df as same view
             self.nifty_df = self.fno_df
+            self.focus_df = self.fno_df
 
             self.source = 'local'
             logger.info("Local instruments loaded: %s rows", len(self.fno_df))
@@ -177,17 +200,19 @@ class InstrumentManager:
             traceback.print_exc()
             return False
 
-    def fetch_instruments(self, force_refresh: bool = False, prefer_local: bool = False) -> bool:
+    def fetch_instruments(self, exchange: str = "NSE", force_refresh: bool = False, prefer_local: bool = False) -> bool:
         """Fetch instruments with filtering and caching (can prefer local file)
 
-        prefer_local: when True will try to load `NSE_Output.xlsx` from the repo root
+        prefer_local: when True (NSE only) will try to load `NSE_Output.xlsx` from the repo root
                       and will prefer it over the cached API results.
         """
 
+        exchange = self._normalize_exchange(exchange)
+        self.exchange = exchange
         local_file = "NSE_Output.xlsx"
 
         # If user explicitly prefers local file, try it first (override cache)
-        if prefer_local and os.path.exists(local_file):
+        if exchange == "NSE" and prefer_local and os.path.exists(local_file):
             loaded = self.load_from_excel(local_file)
             if loaded:
                 logger.info("Instruments loaded from local file (preferred)")
@@ -204,7 +229,8 @@ class InstrumentManager:
         
         try:
             logger.info("Fetching instruments from Upstox...")
-            response = requests.get(self.NSE_INSTRUMENTS_URL, timeout=60)
+            url = self.EXCHANGE_URLS.get(exchange, self.EXCHANGE_URLS["NSE"])
+            response = requests.get(url, timeout=60)
             response.raise_for_status()
             
             logger.info("Decompressing...")
@@ -253,28 +279,35 @@ class InstrumentManager:
             
             logger.info("FnO count: %s", len(self.fno_df))
             
-            # Filter 3: Keep NIFTY, BANKNIFTY, FINNIFTY, etc.
-            logger.info("Popular symbols...")
-            popular_symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50']
-            
-            self.nifty_df = self.fno_df[
-                self.fno_df['name'].astype(str).str.upper().str.contains(
-                    '|'.join(popular_symbols), na=False, regex=True
-                )
-            ].copy()
-            
-            logger.info("Popular symbols count: %s", len(self.nifty_df))
+            # Filter 3: Exchange-specific focus symbols
+            if exchange == "MCX":
+                logger.info("MCX focus symbols (CRUDEOIL, GOLD, NATURALGAS, SILVER)...")
+                mcx_symbols = {"CRUDEOIL", "GOLD", "NATURALGAS", "SILVER"}
+                name_upper = self.fno_df['name'].astype(str).str.upper().str.strip()
+                self.focus_df = self.fno_df[name_upper.isin(mcx_symbols)].copy()
+            else:
+                logger.info("NSE focus symbols (NIFTY)...")
+                self.focus_df = self.fno_df[
+                    self.fno_df['name'].astype(str).str.upper().str.strip() == "NIFTY"
+                ].copy()
+
+            if exchange != "MCX" and (self.focus_df is None or self.focus_df.empty):
+                self.focus_df = self.fno_df
+
+            self.nifty_df = self.focus_df
+
+            logger.info("Focus symbols count: %s", len(self.focus_df))
             
             # Show statistics
             logger.info("Summary:")
             logger.info("Total downloaded: %s", len(df_full))
             logger.info("After FnO filter: %s", len(self.fno_df))
-            logger.info("After symbol filter: %s", len(self.nifty_df))
-            logger.info("Memory used: ~%.1f MB", self.nifty_df.memory_usage(deep=True).sum() / (1024*1024))
+            logger.info("After symbol filter: %s", len(self.focus_df))
+            logger.info("Memory used: ~%.1f MB", self.focus_df.memory_usage(deep=True).sum() / (1024*1024))
             
             # Show sample
-            if len(self.nifty_df) > 0:
-                logger.info("Sample instruments:\n%s", self.nifty_df.head(3)[['name', 'instrument_type', 'expiry', 'strike_price']].to_string())
+            if len(self.focus_df) > 0:
+                logger.info("Sample instruments:\n%s", self.focus_df.head(3)[['name', 'instrument_type', 'expiry', 'strike_price']].to_string())
             
             # Mark source and save to cache
             self.source = 'api'
@@ -292,10 +325,10 @@ class InstrumentManager:
     def get_unique_symbols(self) -> List[str]:
         """Get unique symbols (prefer FnO dataset if present)"""
         df = None
-        if self.fno_df is not None and not self.fno_df.empty:
+        if self.focus_df is not None and not self.focus_df.empty:
+            df = self.focus_df
+        elif self.fno_df is not None and not self.fno_df.empty:
             df = self.fno_df
-        elif self.nifty_df is not None and not self.nifty_df.empty:
-            df = self.nifty_df
 
         if df is None or df.empty:
             logger.error("No data loaded")
@@ -312,10 +345,10 @@ class InstrumentManager:
     def get_expiry_dates(self, symbol: Optional[str] = None) -> List[str]:
         """Get unique expiry dates (uses FnO dataset when available)"""
         df = None
-        if self.fno_df is not None and not self.fno_df.empty:
+        if self.focus_df is not None and not self.focus_df.empty:
+            df = self.focus_df
+        elif self.fno_df is not None and not self.fno_df.empty:
             df = self.fno_df
-        elif self.nifty_df is not None and not self.nifty_df.empty:
-            df = self.nifty_df
 
         if df is None or df.empty:
             logger.warning("No data loaded")
@@ -347,10 +380,10 @@ class InstrumentManager:
     def get_strikes(self, symbol: str, expiry: str, instrument_type: Optional[str] = None) -> List[int]:
         """Get unique strikes; returns empty list for FUT (no strike)"""
         df = None
-        if self.fno_df is not None and not self.fno_df.empty:
+        if self.focus_df is not None and not self.focus_df.empty:
+            df = self.focus_df
+        elif self.fno_df is not None and not self.fno_df.empty:
             df = self.fno_df
-        elif self.nifty_df is not None and not self.nifty_df.empty:
-            df = self.nifty_df
 
         if df is None or df.empty or not symbol or not expiry:
             logger.warning("Missing parameters: symbol=%s, expiry=%s", symbol, expiry)
@@ -404,10 +437,10 @@ class InstrumentManager:
     ) -> Optional[str]:
         """Get instrument key (tolerant matching)"""
         df = None
-        if self.fno_df is not None and not self.fno_df.empty:
+        if self.focus_df is not None and not self.focus_df.empty:
+            df = self.focus_df
+        elif self.fno_df is not None and not self.fno_df.empty:
             df = self.fno_df
-        elif self.nifty_df is not None and not self.nifty_df.empty:
-            df = self.nifty_df
         else:
             return None
 
@@ -492,8 +525,9 @@ class InstrumentManager:
     def clear_cache(self):
         """Clear cache"""
         try:
-            if os.path.exists(self.CACHE_FILE):
-                os.remove(self.CACHE_FILE)
+            cache_file = self._get_cache_file()
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
                 print(f"[OK] Cache cleared")
             else:
                 print("[INFO] No cache to clear")
@@ -502,12 +536,13 @@ class InstrumentManager:
     
     def get_cache_info(self) -> dict:
         """Get cache info"""
-        if not os.path.exists(self.CACHE_FILE):
+        cache_file = self._get_cache_file()
+        if not os.path.exists(cache_file):
             return {'cached': False}
         
         try:
-            file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.CACHE_FILE))
-            file_size = os.path.getsize(self.CACHE_FILE) / (1024 * 1024)
+            file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(cache_file))
+            file_size = os.path.getsize(cache_file) / (1024 * 1024)
             
             return {
                 'cached': True,

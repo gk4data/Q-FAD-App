@@ -62,6 +62,12 @@ def create_main_ui():
             # Symbol, Expiry, Type Selection
             ui.div(
                 ui.h5("TRADING PAIR", style="font-size: 11px; text-transform: uppercase; opacity: 0.8; margin-bottom: 12px;"),
+                ui.input_select(
+                    "exchange",
+                    "Exchange",
+                    choices={"NSE": "NSE (Index/Equity)", "MCX": "MCX (Commodity)"},
+                    selected="NSE"
+                ),
                 ui.output_ui("symbol_selector"),
                 ui.output_ui("expiry_selector"),
                 ui.input_radio_buttons(
@@ -116,6 +122,10 @@ def create_main_ui():
                 ui.h5("📡 SYSTEM STATUS", style="font-size: 11px; margin-bottom: 8px;"),
                 ui.output_text_verbatim("status"),
                 style="margin-top: 16px;"
+            ),
+            ui.div(
+                ui.input_action_button("clear_cache", "✗ Logout", class_="btn-danger", style="width: 100%;"),
+                style="margin-top: 12px;"
             ),
             title="Controls",
             width="320px"
