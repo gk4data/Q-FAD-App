@@ -25,6 +25,7 @@ from src.signals.regime_detection import detect_regimes_relaxed
 from src.signals.angle_classification import classify_trend_by_angles
 from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
+from src.data.live_data_feed import LiveDataRecorder
 from src.viz.plot_signals import plot_signals
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
 from ui import create_auth_ui, create_main_ui
@@ -46,6 +47,7 @@ def define_server(input, output, session):
     
     client = UpstoxClient(use_cache=True)
     instrument_manager = InstrumentManager()
+    live_recorder = LiveDataRecorder()
 
     # ===== Reactive State =====
     token = reactive.Value(None)
@@ -55,6 +57,7 @@ def define_server(input, output, session):
     initial_cash_used = reactive.Value(100000)
     login_url = reactive.Value("")
     status_msg = reactive.Value("Starting app...")
+    live_status_msg = reactive.Value("[INFO] Live data idle")
 
     # Instrument selector state
     instruments_loaded = reactive.Value(False)
@@ -117,6 +120,11 @@ def define_server(input, output, session):
     @render.text
     def status():
         return status_msg.get()
+
+    @output
+    @render.text
+    def live_status():
+        return live_status_msg.get()
 
     @output
     @render.text
@@ -183,6 +191,10 @@ def define_server(input, output, session):
             client.token_manager.clear_token()
         token.set(None)
         status_msg.set("[OK] Token cache cleared. Click 'Show Login URL' to re-authenticate.")
+
+    @session.on_ended
+    def _cleanup_session():
+        live_recorder.stop()
 
     # ===== Instrument Loading & Selection =====
     @reactive.effect
@@ -377,6 +389,35 @@ def define_server(input, output, session):
         except Exception as e:
             status_msg.set(f"[ERROR] Error: {e}")
             traceback.print_exc()
+
+    @reactive.effect
+    def _poll_live_status():
+        reactive.invalidate_later(2000)
+        live_status_msg.set(live_recorder.status())
+
+    @reactive.effect
+    @reactive.event(input.start_live)
+    def _start_live():
+        if not token.get():
+            live_status_msg.set("[ERROR] Authenticate first before starting live data")
+            return
+
+        inst = selected_instrument_key.get() or input.instrument().strip()
+        if not inst:
+            live_status_msg.set("[ERROR] Select an instrument before starting live data")
+            return
+
+        output_dir = input.live_save_dir().strip()
+        ok, message = live_recorder.start(
+            token.get(), inst, output_dir or None, mode="full", save_interval=60
+        )
+        live_status_msg.set("[OK] Live data started" if ok else f"[ERROR] {message}")
+
+    @reactive.effect
+    @reactive.event(input.stop_live)
+    def _stop_live():
+        ok, message = live_recorder.stop()
+        live_status_msg.set("[OK] Live data stopped" if ok else f"[INFO] {message}")
 
     @output
     @render.ui

@@ -111,6 +111,18 @@ def create_main_ui():
             ui.tags.hr(),
 
             ui.div(
+                ui.h4("🔴 LIVE DATA"),
+                ui.input_text("live_save_dir", "Live Data Directory", value="", placeholder="Default: ./live_data"),
+                ui.row(
+                    ui.column(6, ui.input_action_button("start_live", "▶ Start", class_="btn-primary")),
+                    ui.column(6, ui.input_action_button("stop_live", "■ Stop", class_="btn-secondary")),
+                ),
+                ui.output_text_verbatim("live_status"),
+                style="margin-bottom: 24px;"
+            ),
+            ui.tags.hr(),
+
+            ui.div(
                 ui.h4("🎯 BACKTESTING"),
                 ui.input_numeric("initial_cash", "Initial Capital", value=100000, min=1000, max=10000000),
                 ui.input_action_button("run_backtest", "▶ Run Backtest", class_="btn-warning", style="width: 100%;"),
