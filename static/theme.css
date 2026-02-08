@@ -1,10 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 
-/* =====================================================
-   Q-FAD Calm Professional Dark Theme (Eye-Friendly)
-   Fixed: collapse-toggle, header, title bar, icons
-   ===================================================== */
-
 :root {
   --bg-main: #0f141b;
   --bg-panel: #151b23;
@@ -13,7 +8,7 @@
   --border-subtle: #2f3a49;
   --border-strong: #3b4758;
 
-  --text-primary: #e5e7eb;   /* brighter for headers */
+  --text-primary: #e5e7eb;
   --text-secondary: #b0b7c3;
   --text-muted: #7a8392;
 
@@ -24,281 +19,299 @@
 
   --radius-lg: 12px;
   --radius-md: 10px;
-  --shadow-soft: 0 4px 12px rgba(0,0,0,0.35);
+  --shadow-soft: 0 6px 18px rgba(0,0,0,0.35);
 }
 
-/* ============ BASE ============ */
+/* Base */
 html, body {
   background-color: var(--bg-main);
   color: var(--text-primary);
   font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
-  font-size: 14px;
-  line-height: 1.6;
-  height: 100%;
   margin: 0;
-  overflow: auto;
+  padding-bottom: 42px;
 }
 
-/* ============ FORCE TOP BAR / TITLE LIGHT ============ */
-.navbar,
-.navbar *,
-.bslib-page-title,
-.bslib-page-title *,
-.bslib-page-header,
-.bslib-page-header * {
-  color: var(--text-primary) !important;
+nav {
+  background: #2e114e;
 }
 
-.navbar,
-.bslib-page-header {
-  background-color: var(--bg-panel) !important;
-  border-bottom: 1px solid var(--border-strong) !important;
-}
-
-/* ============ FIX COLLAPSE TOGGLE BUTTON ============ */
-button.collapse-toggle {
-  background-color: var(--bg-panel-2) !important;
-  color: var(--text-primary) !important;
-  border: 1px solid var(--border-strong) !important;
-  border-radius: 8px !important;
-  box-shadow: var(--shadow-soft) !important;
-}
-
-/* Icon inside the toggle */
-button.collapse-toggle svg,
-button.collapse-toggle span,
-button.collapse-toggle i {
-  fill: var(--text-primary) !important;
-  stroke: var(--text-primary) !important;
-  color: var(--text-primary) !important;
-}
-
-/* Hover state */
-button.collapse-toggle:hover {
-  border-color: var(--accent-blue) !important;
-  background-color: var(--bg-panel) !important;
-}
-
-/* ============ SHINY / BSLIB CONTAINERS ============ */
-.bslib-page,
-.bslib-page-container,
-.shiny-container,
-.container,
-.container-fluid {
-  background: transparent;
-  color: var(--text-primary);
-}
-
-/* ============ SIDEBAR ============ */
-.sidebar {
+/* Top bar */
+.app-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 18px;
   background: var(--bg-panel);
-  border-right: 2px solid var(--border-strong);
-  padding: 16px;
-  min-height: 100vh;
-  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-strong);
+  margin-left: -15px;
+  margin-right: -15px;
 }
 
-/* Sidebar sections */
-.sidebar .sidebar-section {
+/* Layout */
+.app-layout {
+  padding: 12px 18px;
+  height: calc(100vh - 60px);
+  box-sizing: border-box;
+}
+
+/* Mini sidebar */
+.mini-sidebar {
+  width: 80px;
+  height: 850px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 12px 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* IMPORTANT: Shiny renders radios as .form-check blocks */
+.mini-sidebar-radios .form-check {
+  margin: 0 0 10px 0;
+  padding: 0;
+}
+
+/* Hide native radio */
+.mini-sidebar-radios input[type="radio"] {
+  display: none;
+}
+
+/* Style label as icon button */
+.mini-sidebar-radios label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
   background: var(--bg-panel-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 22px;
+  user-select: none;
+}
+
+/* Checked state */
+.mini-sidebar-radios input[type="radio"]:checked + label {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #ffffff;
+}
+
+/* Hover */
+.mini-sidebar-radios label:hover {
+  border-color: var(--accent-blue);
+}
+
+/* Controls column */
+.controls-column {
+  width: 340px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+}
+
+/* Cards */
+.sidebar-card {
+  background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: 12px;
+  margin-bottom: 12px;
   box-shadow: var(--shadow-soft);
 }
 
-.sidebar .sidebar-section h4,
-.sidebar .sidebar-section h5,
-.sidebar .sidebar-section p,
-.sidebar .sidebar-section label,
-.sidebar .sidebar-section span,
-.sidebar .sidebar-section .shiny-text-output,
-.sidebar .sidebar-section .shiny-html-output,
-.sidebar .sidebar-section pre,
-.sidebar .sidebar-section code {
-  color: var(--text-primary) !important;
+/* Main area */
+.main-area {
+  flex: 1;
+  min-width: 600px;
+  max-height: calc(100vh - 90px);
+  overflow: auto;
 }
 
-.sidebar .sidebar-section .shiny-text-output,
-.sidebar .sidebar-section .shiny-html-output {
-  display: block;
-  margin-top: 10px;
+/* Chart */
+.chart-container {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  min-height: 500px;
 }
 
-.selected-instrument-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.4);
-  border-left: 4px solid var(--accent-green);
-  border-radius: 8px;
-  margin: 8px 0;
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.selected-instrument-code {
-  background: rgba(15, 23, 42, 0.8);
-  color: var(--text-primary);
-  padding: 4px 6px;
-  border-radius: 6px;
-  font-weight: 600;
-}
-
-/* ============ MAIN CONTENT ============ */
-.page-content {
-  background: transparent;
-  padding: 20px;
-}
-
-/* ============ HEADINGS & TEXT ============ */
-h1, h2, h3, h4, h5, h6 {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-p, label, span {
-  color: var(--text-secondary);
-}
-
-/* ============ INPUTS ============ */
+/* Inputs */
 input, select, textarea {
   background: var(--bg-panel-2);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   border-radius: var(--radius-md);
   padding: 8px 10px;
-  font-size: 13px;
   width: 100%;
 }
 
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  border-color: var(--accent-blue);
-}
+/* Buttons */
+.btn-primary { background: var(--accent-blue); color: #fff; }
+.btn-success { background: var(--accent-green); color: #fff; }
+.btn-danger  { background: var(--accent-red); color: #fff; }
+.btn-warning { background: var(--accent-amber); color: #111; }
 
-/* ============ BUTTONS ============ */
-.btn {
-  border-radius: var(--radius-md);
-  padding: 8px 14px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-panel-2);
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-.btn-primary {
-  background: var(--accent-green);
-  border-color: var(--accent-green);
-  color: white;
-}
-
-.btn-success {
-  background: var(--accent-green);
-  border-color: var(--accent-green);
-  color: white;
-}
-
-.btn-danger {
-  background: var(--accent-red);
-  border-color: var(--accent-red);
-  color: white;
-}
-
-/* Force Start/Stop button colors by ID */
-#start_live,
-#start_trading,
+/* Reduce size of the Fetch & Process button */
 #fetch {
-  background: var(--accent-green) !important;
-  border-color: var(--accent-green) !important;
-  color: white !important;
+  padding: 10px 10px;
+  font-size: 14px;
 }
 
-#stop_live,
-#stop_trading,
-#clear_cache {
-  background: var(--accent-red) !important;
-  border-color: var(--accent-red) !important;
-  color: white !important;
-}
-
-.btn-secondary {
-  background: var(--accent-red);
-  border-color: var(--accent-red);
-  color: white;
-}
-
-/* ============ TABS ============ */
+/* Tabs */
 .nav-tabs {
-  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .nav-tabs .nav-link {
   color: var(--text-secondary) !important;
-  border: none;
-  background: transparent;
 }
 
 .nav-tabs .nav-link.active {
   color: var(--text-primary) !important;
-  background: transparent;
   border-bottom: 2px solid var(--accent-blue);
+  background: #1c0c2e;
 }
 
-/* ============ TABLES ============ */
+/* Tables */
 table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 16px 0;
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
 }
 
-th {
-  color: var(--text-secondary);
-  font-weight: 600;
-  padding: 10px 12px;
-  text-align: left;
-  font-size: 12px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-tbody tr:hover {
-  background: rgba(255,255,255,0.03);
-}
-
-/* ============ PLOTLY ============ */
+/* Plotly */
 .plotly-plot, .js-plotly-plot {
   background: transparent !important;
 }
 
-/* ============ SCROLLBAR ============ */
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-thumb {
-  background: #2a3441;
-  border-radius: 8px;
+/* Footer */
+.app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  margin: 0;
+  padding: 10px 12px;
+  font-weight: 700;
+  font-style: Bold;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-strong);
 }
 
-/* ============ FOCUS ============ */
-*:focus-visible {
-  outline: 2px solid var(--accent-blue);
-  outline-offset: 2px;
+/* Status/info text outputs */
+.topbar-right pre,
+.sidebar-card pre,
+.shiny-text-output {
+  color: #e8e5f2;
+  background: transparent;
+  border: 0;
 }
 
-/* ============ SELECTION ============ */
-::selection {
+/* Selected instrument badge */
+.selected-instrument-badge,
+.selected-instrument-badge strong,
+.selected-instrument-badge .selected-instrument-code {
+  color: #e8e5f2;
+}
+
+.selected-instrument-badge .selected-instrument-code {
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+/* Datepicker (Bootstrap) visibility */
+.datepicker,
+.datepicker-dropdown {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+
+.datepicker table tr td,
+.datepicker table tr th {
+  color: var(--text-primary);
+}
+
+.datepicker table tr td.day:hover {
+  background: var(--bg-panel-2);
+}
+
+.datepicker table tr td.active,
+.datepicker table tr td.active:hover,
+.datepicker table tr td.active:active,
+.datepicker table tr td.active:focus {
   background: var(--accent-blue);
-  color: white;
+  color: #ffffff;
+}
+
+.datepicker table tr td.old,
+.datepicker table tr td.new,
+.datepicker table tr td.disabled,
+.datepicker table tr td.disabled:hover {
+  color: var(--text-muted);
+}
+/* ===== FORCE MINI SIDEBAR ICONS TO SHOW (SHINY FIX) ===== */
+
+/* Make sure the radio group itself is visible */
+.mini-sidebar-radios {
+  width: 100%;
+}
+
+/* Each Shiny radio item */
+.mini-sidebar-radios .form-check {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 12px 0;
+}
+
+.mini-sidebar-radios .radio {
+  margin: 10px 0 12px 0;
+}
+
+/* Hide the actual radio input */
+.mini-sidebar-radios .form-check-input {
+  display: none !important;
+}
+
+/* Style the LABEL that contains the emoji */
+.mini-sidebar-radios .form-check-label {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-subtle);
+  color: #ffffff !important;          /* FORCE visible text */
+  font-size: 22px !important;         /* FORCE emoji size */
+  cursor: pointer;
+  user-select: none;
+  opacity: 1 !important;              /* FORCE visible */
+}
+
+/* Checked (active) state */
+.mini-sidebar-radios .form-check-input:checked + .form-check-label {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #ffffff !important;
+}
+
+/* Hover */
+.mini-sidebar-radios .form-check-label:hover {
+  border-color: var(--accent-blue);
+}
+/* Hide the radio group label (this is the blank button you see) */
+.mini-sidebar-radios > .control-label,
+.mini-sidebar-radios > label.control-label,
+#sidebar_mode-label {
+  display: none !important;
 }

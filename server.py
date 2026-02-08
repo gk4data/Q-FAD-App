@@ -326,11 +326,8 @@ def define_server(input, output, session):
         # Default to next Tuesday
         next_tuesday = get_next_tuesday()
         default = next_tuesday if next_tuesday in expiry_dates else expiry_dates[0]
-        min_date = min(expiry_dates)
-        max_date = max(expiry_dates)
-
         logger.debug("expiry_selector default (date): %s", default)
-        return ui.input_date("select_expiry", "Choose Expiry", value=default, min=min_date, max=max_date)
+        return ui.input_date("select_expiry", "Choose Expiry", value=default)
 
     @reactive.effect
     def _update_strikes():
@@ -951,17 +948,17 @@ def define_server(input, output, session):
 
                 rows.append(
                     ui.tags.tr(
-                        ui.tags.td(ui.strong(k + ":")),
-                        ui.tags.td(formatted_v)
+                        ui.tags.td(ui.strong(k + ":"), style="border: 1px solid #333; padding: 6px 8px;"),
+                        ui.tags.td(formatted_v, style="border: 1px solid #333; padding: 6px 8px;")
                     )
                 )
             return ui.div(
-                ui.h4("Backtest Results"),
+                ui.h4("Backtest Results", style="color: #e8e5f2;"),
                 ui.tags.table(
                     ui.tags.tbody(*rows),
-                    style="border-collapse: collapse; width: 100%; margin-top: 10px; border: 1px solid #ddd;",
+                    style="border-collapse: collapse; width: 100%; margin-top: 10px; border: 1px solid #333;",
                 ),
-                style="padding: 20px; background-color: #f8f9fa; border-radius: 5px;"
+                style="padding: 20px; background-color: #000; border-radius: 5px; color: #e8e5f2;"
             )
         except Exception as e:
             return ui.p(f"Error rendering summary: {e}")
