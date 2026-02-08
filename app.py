@@ -20,7 +20,9 @@ def main():
     app = App(
         app_ui,
         define_server,
-        static_assets=os.path.join(os.path.dirname(__file__), "static")
+        static_assets={
+            "/static": os.path.join(os.path.dirname(__file__), "static")
+        }
     )
     
     return app

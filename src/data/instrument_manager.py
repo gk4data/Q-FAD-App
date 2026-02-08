@@ -25,7 +25,7 @@ class InstrumentManager:
     }
     CACHE_FILE_TEMPLATE = "instruments_cache_{exchange}.pkl"
     CACHE_DURATION_DAYS = 30
-    REQUIRED_COLUMNS = ['name', 'instrument_type', 'expiry', 'instrument_key', 'strike_price']
+    REQUIRED_COLUMNS = ['name', 'instrument_type', 'expiry', 'instrument_key', 'strike_price', 'lot_size']
     
     def __init__(self):
         self.df = None
@@ -533,6 +533,34 @@ class InstrumentManager:
                 print("[INFO] No cache to clear")
         except Exception as e:
             print(f"[ERROR] Error: {e}")
+
+    def get_lot_size(self, instrument_key: str) -> int:
+        """Return lot size for an instrument key; defaults to 1 when unavailable."""
+        df = None
+        if self.focus_df is not None and not self.focus_df.empty:
+            df = self.focus_df
+        elif self.fno_df is not None and not self.fno_df.empty:
+            df = self.fno_df
+        elif self.df is not None and not self.df.empty:
+            df = self.df
+
+        if df is None or df.empty:
+            return 1
+
+        if 'lot_size' not in df.columns:
+            return 1
+
+        try:
+            row = df[df['instrument_key'] == instrument_key].head(1)
+            if row.empty:
+                return 1
+            lot_size = row['lot_size'].iloc[0]
+            if lot_size is None or pd.isna(lot_size):
+                return 1
+            lot_size_int = int(float(lot_size))
+            return lot_size_int if lot_size_int > 0 else 1
+        except Exception:
+            return 1
     
     def get_cache_info(self) -> dict:
         """Get cache info"""
