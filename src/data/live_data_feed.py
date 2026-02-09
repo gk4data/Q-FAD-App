@@ -4,8 +4,7 @@ import logging
 import os
 import ssl
 import threading
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
@@ -98,102 +97,122 @@ class LiveDataRecorder:
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
-        auth_response = self._authorize(access_token)
-        logger.info("Authorization response: %s", auth_response)
-        ws_url = auth_response.get("data", {}).get("authorized_redirect_uri")
-        if not ws_url:
-            raise RuntimeError("WebSocket URL not found in authorization response")
 
         ohlc_df = pd.DataFrame(
             columns=["timestamp", "symbol", "open", "high", "low", "close", "volume"]
         )
-        last_save_time = time.time()
         output_path = self._build_output_path(output_dir, instrument_key)
+        last_exchange_minute = None
 
-        async with websockets.connect(ws_url, ssl=ssl_context) as websocket:
-            logger.info("Live data websocket connected")
-            await asyncio.sleep(0.5)
-            payload = {
-                "guid": "qfad-live",
-                "method": "sub",
-                "data": {"mode": mode, "instrumentKeys": [instrument_key]},
-            }
-            await websocket.send(json.dumps(payload).encode("utf-8"))
-            logger.info("Live data subscribed: %s", instrument_key)
+        while not self._stop_event.is_set():
+            try:
+                auth_response = self._authorize(access_token)
+                logger.info("Authorization response: %s", auth_response)
+                ws_url = auth_response.get("data", {}).get("authorized_redirect_uri")
+                if not ws_url:
+                    raise RuntimeError("WebSocket URL not found in authorization response")
 
-            while not self._stop_event.is_set():
-                try:
-                    message = await asyncio.wait_for(websocket.recv(), timeout=1)
-                except asyncio.TimeoutError:
-                    continue
-
-                decoded = FeedResponse()
-                decoded.ParseFromString(message)
-                data_dict = MessageToDict(decoded, preserving_proto_field_name=True)
-                feeds = data_dict.get("feeds", {})
-
-                for symbol, details in feeds.items():
-                    ohlc_data = (
-                        details.get("fullFeed", {})
-                        .get("marketFF", {})
-                        .get("marketOHLC", {})
-                        .get("ohlc", [])
-                    )
-                    for candle in ohlc_data:
-                        if candle.get("interval") != "I1":
+                async with websockets.connect(ws_url, ssl=ssl_context) as websocket:
+                    logger.info("Live data websocket connected")
+                    await asyncio.sleep(0.5)
+                    payload = {
+                        "guid": "qfad-live",
+                        "method": "sub",
+                        "data": {"mode": mode, "instrumentKeys": [instrument_key]},
+                    }
+                    await websocket.send(json.dumps(payload).encode("utf-8"))
+                    logger.info("Live data subscribed: %s", instrument_key)
+                    while not self._stop_event.is_set():
+                        try:
+                            message = await asyncio.wait_for(websocket.recv(), timeout=1)
+                        except asyncio.TimeoutError:
                             continue
-                        ts_value = candle.get("ts")
-                        timestamp = self._parse_timestamp(ts_value)
 
-                        mask = (ohlc_df["timestamp"] == timestamp) & (
-                            ohlc_df["symbol"] == symbol
-                        )
-                        if not ohlc_df[mask].empty:
-                            ohlc_df.loc[
-                                mask, ["open", "high", "low", "close", "volume"]
-                            ] = [
-                                candle.get("open"),
-                                candle.get("high"),
-                                candle.get("low"),
-                                candle.get("close"),
-                                candle.get("vol", 0),
-                            ]
-                        else:
-                            new_row = {
-                                "timestamp": timestamp,
-                                "symbol": symbol,
-                                "open": candle.get("open"),
-                                "high": candle.get("high"),
-                                "low": candle.get("low"),
-                                "close": candle.get("close"),
-                                "volume": candle.get("vol", 0),
-                            }
-                            ohlc_df.loc[len(ohlc_df)] = new_row
+                        decoded = FeedResponse()
+                        decoded.ParseFromString(message)
+                        data_dict = MessageToDict(decoded, preserving_proto_field_name=True)
+                        feeds = data_dict.get("feeds", {})
 
-                    if ohlc_data:
-                        last_candle = ohlc_data[-1]
-                        logger.info(
-                            "Live tick %s %s O=%s H=%s L=%s C=%s V=%s",
-                            symbol,
-                            last_candle.get("interval"),
-                            last_candle.get("open"),
-                            last_candle.get("high"),
-                            last_candle.get("low"),
-                            last_candle.get("close"),
-                            last_candle.get("vol", 0),
-                        )
+                        for symbol, details in feeds.items():
+                            ohlc_data = (
+                                details.get("fullFeed", {})
+                                .get("marketFF", {})
+                                .get("marketOHLC", {})
+                                .get("ohlc", [])
+                            )
+                            for candle in ohlc_data:
+                                if candle.get("interval") != "I1":
+                                    continue
+                                ts_value = candle.get("ts")
+                                timestamp = self._parse_timestamp(ts_value).replace(
+                                    second=0, microsecond=0
+                                )
 
-                if time.time() - last_save_time >= save_interval:
-                    ohlc_df.drop_duplicates(
-                        subset=["timestamp", "symbol"], keep="last", inplace=True
-                    )
-                    ohlc_df.sort_values(by="timestamp", inplace=True)
-                    ohlc_df.to_csv(output_path, index=False)
-                    last_save_time = time.time()
-                    with self._lock:
-                        self._last_save_path = output_path
-                        self._last_save_time = datetime.now()
-                    logger.info("Live data saved: %s rows to %s", len(ohlc_df), output_path)
+                                mask = (ohlc_df["timestamp"] == timestamp) & (
+                                    ohlc_df["symbol"] == symbol
+                                )
+                                if not ohlc_df[mask].empty:
+                                    ohlc_df.loc[
+                                        mask, ["open", "high", "low", "close", "volume"]
+                                    ] = [
+                                        candle.get("open"),
+                                        candle.get("high"),
+                                        candle.get("low"),
+                                        candle.get("close"),
+                                        candle.get("vol", 0),
+                                    ]
+                                else:
+                                    new_row = {
+                                        "timestamp": timestamp,
+                                        "symbol": symbol,
+                                        "open": candle.get("open"),
+                                        "high": candle.get("high"),
+                                        "low": candle.get("low"),
+                                        "close": candle.get("close"),
+                                        "volume": candle.get("vol", 0),
+                                    }
+                                    ohlc_df.loc[len(ohlc_df)] = new_row
+
+                            if ohlc_data:
+                                last_candle = ohlc_data[-1]
+                                readable_ts = self._parse_timestamp(last_candle.get("ts"))
+                                current_minute = readable_ts.replace(second=0, microsecond=0)
+                                logger.info(
+                                    "Live tick %s %s ts=%s ts_hr=%s O=%s H=%s L=%s C=%s V=%s",
+                                    symbol,
+                                    last_candle.get("interval"),
+                                    last_candle.get("ts"),
+                                    readable_ts.strftime("%Y-%m-%d %H:%M:%S"),
+                                    last_candle.get("open"),
+                                    last_candle.get("high"),
+                                    last_candle.get("low"),
+                                    last_candle.get("close"),
+                                    last_candle.get("vol", 0),
+                                )
+                                if last_exchange_minute is None:
+                                    last_exchange_minute = current_minute
+                                elif current_minute != last_exchange_minute:
+                                    last_exchange_minute = current_minute
+                                    save_df = ohlc_df[ohlc_df["timestamp"] < current_minute]
+                                    if not save_df.empty:
+                                        save_df = save_df.drop_duplicates(
+                                            subset=["timestamp", "symbol"], keep="last"
+                                        ).sort_values(by="timestamp")
+                                        save_df.to_csv(output_path, index=False)
+                                        with self._lock:
+                                            self._last_save_path = output_path
+                                            self._last_save_time = datetime.now()
+                                        logger.info(
+                                            "Live data saved: %s rows to %s",
+                                            len(save_df),
+                                            output_path,
+                                        )
+
+            except Exception as exc:
+                logger.warning("Live data websocket error: %s", exc)
+                with self._lock:
+                    self._last_error = str(exc)
+                continue
 
         with self._lock:
             self._running = False
