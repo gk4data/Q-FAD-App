@@ -235,7 +235,7 @@ def create_app_ui():
     return ui.page_fluid(
         ui.tags.head(
             ui.tags.link(rel="stylesheet", href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"),
-            ui.tags.link(rel="stylesheet", href="/static/theme.css?v=9"),
+            ui.include_css("static/theme.css"),
         ),
         ui.output_ui("app_root"),
     )

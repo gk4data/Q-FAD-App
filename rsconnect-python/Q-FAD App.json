@@ -5,7 +5,7 @@
         "app_url": "https://gk4data.shinyapps.io/q-fad_trading_platform/",
         "app_id": "16582937",
         "app_guid": null,
-        "title": "Q-FAD Trading Platform",
+        "title": "Q-FAD App",
         "app_mode": "python-shiny",
         "app_store_version": 1
     }
