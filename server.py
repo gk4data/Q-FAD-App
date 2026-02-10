@@ -26,7 +26,6 @@ from src.signals.regime_detection import detect_regimes_relaxed
 from src.signals.angle_classification import classify_trend_by_angles
 from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
-from src.data.live_data_feed import LiveDataRecorder
 from src.viz.plot_signals import plot_signals
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
 from ui import create_auth_ui, create_main_ui
@@ -48,7 +47,6 @@ def define_server(input, output, session):
     
     client = UpstoxClient(use_cache=True)
     instrument_manager = InstrumentManager()
-    live_recorder = LiveDataRecorder()
     sandbox_client = UpstoxSandboxClient()
 
     # ===== Reactive State =====
@@ -62,7 +60,9 @@ def define_server(input, output, session):
     live_status_msg = reactive.Value("[INFO] Live data idle")
     trade_status_msg = reactive.Value("[INFO] Live trading idle")
     live_trading_enabled = reactive.Value(False)
+    live_fetch_enabled = reactive.Value(False)
     last_signal_key = reactive.Value(None)
+    last_traded_ts = reactive.Value(None)
     order_log = reactive.Value(pd.DataFrame(columns=[
         "time", "action", "instrument", "qty", "price", "order_id", "status", "message"
     ]))
@@ -226,7 +226,7 @@ def define_server(input, output, session):
 
     @session.on_ended
     def _cleanup_session():
-        live_recorder.stop()
+        pass
 
     # ===== Instrument Loading & Selection =====
     @reactive.effect
@@ -422,31 +422,96 @@ def define_server(input, output, session):
     @reactive.effect
     def _poll_live_status():
         reactive.invalidate_later(2000)
-        live_status_msg.set(live_recorder.status())
+        if live_fetch_enabled.get():
+            return
+        live_status_msg.set("[INFO] Live fetch idle")
 
-    @reactive.effect
-    @reactive.event(input.start_live)
-    def _start_live():
+    def _live_fetch_once():
         if not token.get():
-            live_status_msg.set("[ERROR] Authenticate first before starting live data")
+            live_status_msg.set("[ERROR] Authenticate first before live fetch")
             return
 
         inst = selected_instrument_key.get() or input.instrument().strip()
         if not inst:
-            live_status_msg.set("[ERROR] Select an instrument before starting live data")
+            live_status_msg.set("[ERROR] Select an instrument before live fetch")
             return
 
-        output_dir = input.live_save_dir().strip()
-        ok, message = live_recorder.start(
-            token.get(), inst, output_dir or None, mode="full", save_interval=60
-        )
-        live_status_msg.set("[OK] Live data started" if ok else f"[ERROR] {message}")
+        try:
+            interval = "1minute"
+            live_status_msg.set(f"[INFO] Live fetch: {inst} ({interval})")
+            raw_df = fetch_intraday_data(
+                inst, token.get(), interval=interval, mode="intraday"
+            )
+            if raw_df is None or raw_df.empty:
+                live_status_msg.set("[WARN] Live fetch returned no data")
+                return
+
+            required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
+            missing_cols = required_cols - set(raw_df.columns)
+            if missing_cols:
+                live_status_msg.set(f"[ERROR] Live fetch missing columns: {sorted(missing_cols)}")
+                return
+
+            target_date_str = _as_iso(_dt.now().date())
+            raw_df = concatenate_with_previous_day(
+                raw_df, inst, token.get(), target_date_str, interval=interval, mode="date_range"
+            )
+
+            df = calculate_indicators(raw_df)
+            df = detect_regimes_relaxed(df)
+            df = classify_trend_by_angles(df)
+            df = add_long_signal(df)
+            df = filter_to_current_day(df, target_date_str)
+            df_data.set(df.copy())
+            try:
+                last_ts = df["Date"].max()
+                last_ts_str = (
+                    last_ts.strftime("%Y-%m-%d %H:%M:%S")
+                    if last_ts is not None and pd.notna(last_ts)
+                    else "--"
+                )
+            except Exception:
+                last_ts_str = "--"
+
+            if input.auto_save():
+                base_dir = input.save_dir().strip() or None
+                path = save_to_csv(df, base_dir=base_dir)
+                live_status_msg.set(
+                    f"[OK] Live fetch updated ({len(df)} rows) last={last_ts_str}. Saved: {path}"
+                )
+            else:
+                live_status_msg.set(
+                    f"[OK] Live fetch updated ({len(df)} rows) last={last_ts_str}"
+                )
+            logger.info("Live fetch updated: rows=%s last=%s", len(df), last_ts_str)
+            _maybe_execute_trade(df)
+        except Exception as exc:
+            live_status_msg.set(f"[ERROR] Live fetch error: {exc}")
+            traceback.print_exc()
+
+    @reactive.effect
+    def _live_fetch_loop():
+        if not live_fetch_enabled.get():
+            return
+        now = _dt.now()
+        if now.second != 0 or now.microsecond != 0:
+            delay = 60 - now.second - (now.microsecond / 1_000_000)
+            reactive.invalidate_later(max(delay, 0.5))
+            return
+        reactive.invalidate_later(60)
+        _live_fetch_once()
+
+    @reactive.effect
+    @reactive.event(input.start_live)
+    def _start_live():
+        live_fetch_enabled.set(True)
+        _live_fetch_once()
 
     @reactive.effect
     @reactive.event(input.stop_live)
     def _stop_live():
-        ok, message = live_recorder.stop()
-        live_status_msg.set("[OK] Live data stopped" if ok else f"[INFO] {message}")
+        live_fetch_enabled.set(False)
+        live_status_msg.set("[INFO] Live fetch stopped")
 
     def _append_order_log(action, instrument, qty, price, order_id, status, message):
         df = order_log.get()
@@ -463,6 +528,172 @@ def define_server(input, output, session):
             }
         ])
         order_log.set(pd.concat([df, entry], ignore_index=True))
+
+    def _maybe_execute_trade(df):
+        if not live_trading_enabled.get():
+            return
+        if not live_fetch_enabled.get():
+            return
+        if df is None or df.empty:
+            return
+
+        last_row = df.iloc[-1]
+        ts_val = last_row.get("Date")
+        if ts_val is None or pd.isna(ts_val):
+            return
+        if last_traded_ts.get() == ts_val:
+            return
+        last_traded_ts.set(ts_val)
+
+        buy_signal = bool(last_row.get("Buy_Signal", False))
+        sell_signal = bool(last_row.get("Sell_Signal", False))
+        logger.info(
+            "Live trading check: latest=%s buy=%s sell=%s",
+            ts_val,
+            buy_signal,
+            sell_signal,
+        )
+        signal_key = f"{ts_val}-{int(buy_signal)}-{int(sell_signal)}"
+        if last_signal_key.get() == signal_key:
+            return
+
+        if not buy_signal and not sell_signal:
+            last_signal_key.set(signal_key)
+            return
+
+        token_val = _get_sandbox_token()
+        if not token_val:
+            trade_status_msg.set("[ERROR] Missing sandbox token")
+            return
+
+        inst = selected_instrument_key.get() or input.instrument().strip()
+        if not inst:
+            trade_status_msg.set("[ERROR] Select an instrument for trading")
+            return
+
+        price = last_row.get("Close")
+        try:
+            price = float(price)
+        except Exception:
+            price = None
+
+        capital = input.trade_capital()
+        sl_pct = input.sl_percent()
+        product_type = input.product_type()
+        lot_size = instrument_manager.get_lot_size(inst)
+        qty = _calculate_qty(price, capital, lot_size)
+
+        if qty <= 0:
+            trade_status_msg.set("[ERROR] Quantity calculated as 0; check capital/price/lot size")
+            _append_order_log("SKIP", inst, qty, price, None, "error", "Quantity is 0")
+            last_signal_key.set(signal_key)
+            return
+
+        state = position_state.get() or {}
+        if buy_signal and state.get("open"):
+            _append_order_log("SKIP", inst, qty, price, None, "info", "Position already open")
+            last_signal_key.set(signal_key)
+            return
+
+        if sell_signal and not state.get("open"):
+            _append_order_log("SKIP", inst, qty, price, None, "info", "No open position to close")
+            last_signal_key.set(signal_key)
+            return
+
+        try:
+            if buy_signal:
+                payload = {
+                    "quantity": qty,
+                    "product": product_type,
+                    "validity": "DAY",
+                    "price": 0,
+                    "tag": "qfad-entry",
+                    "instrument_token": inst,
+                    "order_type": "MARKET",
+                    "transaction_type": "BUY",
+                    "disclosed_quantity": 0,
+                    "trigger_price": 0,
+                    "is_amo": False,
+                    "slice": False,
+                }
+                resp = sandbox_client.place_order(token_val, payload)
+                order_ids = resp.get("data", {}).get("order_ids", [])
+                entry_id = order_ids[0] if order_ids else None
+                _append_order_log("BUY", inst, qty, price, entry_id, "success", "Entry placed")
+
+                sl_trigger = round(price * (1 - (sl_pct / 100.0)), 2) if price else 0
+                sl_payload = {
+                    "quantity": qty,
+                    "product": product_type,
+                    "validity": "DAY",
+                    "price": 0,
+                    "tag": "qfad-sl",
+                    "instrument_token": inst,
+                    "order_type": "SL-M",
+                    "transaction_type": "SELL",
+                    "disclosed_quantity": 0,
+                    "trigger_price": sl_trigger,
+                    "is_amo": False,
+                    "slice": False,
+                }
+                sl_resp = sandbox_client.place_order(token_val, sl_payload)
+                sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
+                sl_id = sl_order_ids[0] if sl_order_ids else None
+                _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", "Stop loss placed")
+
+                position_state.set({
+                    "open": True,
+                    "entry_order_id": entry_id,
+                    "sl_order_id": sl_id,
+                    "entry_price": price,
+                    "qty": qty,
+                    "instrument": inst,
+                })
+                trade_status_msg.set("[OK] Entry + SL placed (sandbox)")
+
+            if sell_signal:
+                sl_id = state.get("sl_order_id")
+                if sl_id:
+                    try:
+                        sandbox_client.cancel_order(token_val, sl_id)
+                        _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "success", "SL canceled")
+                    except Exception as cancel_exc:
+                        _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "error", str(cancel_exc))
+
+                exit_payload = {
+                    "quantity": state.get("qty"),
+                    "product": product_type,
+                    "validity": "DAY",
+                    "price": 0,
+                    "tag": "qfad-exit",
+                    "instrument_token": inst,
+                    "order_type": "MARKET",
+                    "transaction_type": "SELL",
+                    "disclosed_quantity": 0,
+                    "trigger_price": 0,
+                    "is_amo": False,
+                    "slice": False,
+                }
+                exit_resp = sandbox_client.place_order(token_val, exit_payload)
+                exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
+                exit_id = exit_order_ids[0] if exit_order_ids else None
+                _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", "Exit placed")
+
+                position_state.set({
+                    "open": False,
+                    "entry_order_id": None,
+                    "sl_order_id": None,
+                    "entry_price": None,
+                    "qty": 0,
+                    "instrument": None,
+                })
+                trade_status_msg.set("[OK] Exit placed (sandbox)")
+
+            last_signal_key.set(signal_key)
+
+        except Exception as exc:
+            trade_status_msg.set(f"[ERROR] Trading error: {exc}")
+            _append_order_log("ERROR", inst, qty, price, None, "error", str(exc))
 
     def _calculate_qty(price, capital, lot_size):
         if price is None or price <= 0:
@@ -684,171 +915,7 @@ def define_server(input, output, session):
 
     @reactive.effect
     def _live_trading_loop():
-        if not live_trading_enabled.get():
-            return
-
-        reactive.invalidate_later(5000)
-
-        df = df_data.get()
-        if df is None or df.empty:
-            logger.info("Live trading active: waiting for data")
-            return
-
-        last_row = df.iloc[-1]
-        ts_val = last_row.get("Date")
-        if ts_val is None or pd.isna(ts_val):
-            logger.info("Live trading active: latest row has no timestamp")
-            return
-
-        buy_signal = bool(last_row.get("Buy_Signal", False))
-        sell_signal = bool(last_row.get("Sell_Signal", False))
-        logger.info(
-            "Live trading active: latest=%s buy=%s sell=%s",
-            ts_val,
-            buy_signal,
-            sell_signal,
-        )
-        signal_key = f"{ts_val}-{int(buy_signal)}-{int(sell_signal)}"
-        if last_signal_key.get() == signal_key:
-            return
-
-        if not buy_signal and not sell_signal:
-            last_signal_key.set(signal_key)
-            return
-
-        token_val = _get_sandbox_token()
-        if not token_val:
-            trade_status_msg.set("[ERROR] Missing sandbox token")
-            return
-
-        inst = selected_instrument_key.get() or input.instrument().strip()
-        if not inst:
-            trade_status_msg.set("[ERROR] Select an instrument for trading")
-            return
-
-        price = last_row.get("Close")
-        try:
-            price = float(price)
-        except Exception:
-            price = None
-
-        capital = input.trade_capital()
-        sl_pct = input.sl_percent()
-        product_type = input.product_type()
-        lot_size = instrument_manager.get_lot_size(inst)
-        qty = _calculate_qty(price, capital, lot_size)
-
-        if qty <= 0:
-            trade_status_msg.set("[ERROR] Quantity calculated as 0; check capital/price/lot size")
-            _append_order_log("SKIP", inst, qty, price, None, "error", "Quantity is 0")
-            last_signal_key.set(signal_key)
-            return
-
-        state = position_state.get() or {}
-        if buy_signal and state.get("open"):
-            _append_order_log("SKIP", inst, qty, price, None, "info", "Position already open")
-            last_signal_key.set(signal_key)
-            return
-
-        if sell_signal and not state.get("open"):
-            _append_order_log("SKIP", inst, qty, price, None, "info", "No open position to close")
-            last_signal_key.set(signal_key)
-            return
-
-        try:
-            if buy_signal:
-                payload = {
-                    "quantity": qty,
-                    "product": product_type,
-                    "validity": "DAY",
-                    "price": 0,
-                    "tag": "qfad-entry",
-                    "instrument_token": inst,
-                    "order_type": "MARKET",
-                    "transaction_type": "BUY",
-                    "disclosed_quantity": 0,
-                    "trigger_price": 0,
-                    "is_amo": False,
-                    "slice": False,
-                }
-                resp = sandbox_client.place_order(token_val, payload)
-                order_ids = resp.get("data", {}).get("order_ids", [])
-                entry_id = order_ids[0] if order_ids else None
-                _append_order_log("BUY", inst, qty, price, entry_id, "success", "Entry placed")
-
-                sl_trigger = round(price * (1 - (sl_pct / 100.0)), 2) if price else 0
-                sl_payload = {
-                    "quantity": qty,
-                    "product": product_type,
-                    "validity": "DAY",
-                    "price": 0,
-                    "tag": "qfad-sl",
-                    "instrument_token": inst,
-                    "order_type": "SL-M",
-                    "transaction_type": "SELL",
-                    "disclosed_quantity": 0,
-                    "trigger_price": sl_trigger,
-                    "is_amo": False,
-                    "slice": False,
-                }
-                sl_resp = sandbox_client.place_order(token_val, sl_payload)
-                sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
-                sl_id = sl_order_ids[0] if sl_order_ids else None
-                _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", "Stop loss placed")
-
-                position_state.set({
-                    "open": True,
-                    "entry_order_id": entry_id,
-                    "sl_order_id": sl_id,
-                    "entry_price": price,
-                    "qty": qty,
-                    "instrument": inst,
-                })
-                trade_status_msg.set("[OK] Entry + SL placed (sandbox)")
-
-            if sell_signal:
-                sl_id = state.get("sl_order_id")
-                if sl_id:
-                    try:
-                        sandbox_client.cancel_order(token_val, sl_id)
-                        _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "success", "SL canceled")
-                    except Exception as cancel_exc:
-                        _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "error", str(cancel_exc))
-
-                exit_payload = {
-                    "quantity": state.get("qty"),
-                    "product": product_type,
-                    "validity": "DAY",
-                    "price": 0,
-                    "tag": "qfad-exit",
-                    "instrument_token": inst,
-                    "order_type": "MARKET",
-                    "transaction_type": "SELL",
-                    "disclosed_quantity": 0,
-                    "trigger_price": 0,
-                    "is_amo": False,
-                    "slice": False,
-                }
-                exit_resp = sandbox_client.place_order(token_val, exit_payload)
-                exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
-                exit_id = exit_order_ids[0] if exit_order_ids else None
-                _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", "Exit placed")
-
-                position_state.set({
-                    "open": False,
-                    "entry_order_id": None,
-                    "sl_order_id": None,
-                    "entry_price": None,
-                    "qty": 0,
-                    "instrument": None,
-                })
-                trade_status_msg.set("[OK] Exit placed (sandbox)")
-
-            last_signal_key.set(signal_key)
-
-        except Exception as exc:
-            trade_status_msg.set(f"[ERROR] Trading error: {exc}")
-            _append_order_log("ERROR", inst, qty, price, None, "error", str(exc))
+        return
 
     # ===== Backtesting =====
     @reactive.effect
@@ -882,6 +949,7 @@ def define_server(input, output, session):
     @output
     @render_plotly
     def price_plot():
+        reactive.invalidate_later(2000)
         df = df_data.get()
         if df is None or df.empty:
             fig = go.Figure()

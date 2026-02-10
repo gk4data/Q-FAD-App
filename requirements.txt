@@ -10,5 +10,3 @@ backtesting>=0.3.3
 tqdm
 openpyxl
 nbformat
-websockets>=11.0
-protobuf>=4.25.6
