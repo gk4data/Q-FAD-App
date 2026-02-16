@@ -26,6 +26,7 @@ from src.signals.regime_detection import detect_regimes_relaxed
 from src.signals.angle_classification import classify_trend_by_angles
 from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
+from src.data.live_data_feed import LiveDataRecorder
 from src.viz.plot_signals import plot_signals
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
 from ui import create_auth_ui, create_main_ui
@@ -48,6 +49,7 @@ def define_server(input, output, session):
     client = UpstoxClient(use_cache=True)
     instrument_manager = InstrumentManager()
     sandbox_client = UpstoxSandboxClient()
+    live_recorder = LiveDataRecorder()
 
     # ===== Reactive State =====
     token = reactive.Value(None)
@@ -58,6 +60,7 @@ def define_server(input, output, session):
     login_url = reactive.Value("")
     status_msg = reactive.Value("Starting app...")
     live_status_msg = reactive.Value("[INFO] Live data idle")
+    websocket_status_msg = reactive.Value("[INFO] WebSocket idle")
     trade_status_msg = reactive.Value("[INFO] Live trading idle")
     live_trading_enabled = reactive.Value(False)
     live_fetch_enabled = reactive.Value(False)
@@ -141,6 +144,11 @@ def define_server(input, output, session):
     @render.text
     def live_status():
         return live_status_msg.get()
+
+    @output
+    @render.text
+    def websocket_status():
+        return websocket_status_msg.get()
 
     @output
     @render.text
@@ -437,6 +445,11 @@ def define_server(input, output, session):
             return
         live_status_msg.set("[INFO] Live fetch idle")
 
+    @reactive.effect
+    def _poll_websocket_status():
+        reactive.invalidate_later(2000)
+        websocket_status_msg.set(live_recorder.status())
+
     def _live_fetch_once():
         if not token.get():
             live_status_msg.set("[ERROR] Authenticate first before live fetch")
@@ -527,6 +540,30 @@ def define_server(input, output, session):
     def _stop_live():
         live_fetch_enabled.set(False)
         live_status_msg.set("[INFO] Live fetch stopped")
+
+    @reactive.effect
+    @reactive.event(input.start_websocket)
+    def _start_websocket():
+        if not token.get():
+            websocket_status_msg.set("[ERROR] Authenticate first before starting WebSocket")
+            return
+
+        inst = selected_instrument_key.get() or input.instrument().strip()
+        if not inst:
+            websocket_status_msg.set("[ERROR] Select an instrument before starting WebSocket")
+            return
+
+        output_dir = input.websocket_save_dir().strip()
+        ok, message = live_recorder.start(
+            token.get(), inst, output_dir or None, mode="full", save_interval=60
+        )
+        websocket_status_msg.set("[OK] WebSocket started" if ok else f"[ERROR] {message}")
+
+    @reactive.effect
+    @reactive.event(input.stop_websocket)
+    def _stop_websocket():
+        ok, message = live_recorder.stop()
+        websocket_status_msg.set("[OK] WebSocket stopped" if ok else f"[INFO] {message}")
 
     def _append_order_log(action, instrument, qty, price, order_id, status, message):
         df = order_log.get()
