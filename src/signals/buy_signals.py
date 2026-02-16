@@ -37,14 +37,20 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     ]
     _ensure_columns(df, required)
     
-   # first-row scalars (as you had)
-    first_volume_profile = df['volume_profile'].iloc[0]
-    first_close = df['Close'].iloc[0]
-    first_open  = df['Open'].iloc[0]
-    first_high  = df['High'].iloc[0]
-    first_low   = df['Low'].iloc[0]
-    first_bbl   = df['BBL'].iloc[0]
-    first_bbm   = df['BBM'].iloc[0]
+   # Find first candle of current trading day (9:15) instead of iloc[0]
+   # This is important because df may include previous day data for indicator calculation
+    first_915_rows = df[df['Date'].dt.time == pd.to_datetime('09:15:00').time()]
+    if len(first_915_rows) == 0:
+        raise ValueError("No 9:15 candle found in data. Cannot determine day opening values.")
+    
+    first_idx = first_915_rows.index[0]
+    first_volume_profile = df.loc[first_idx, 'volume_profile']
+    first_close = df.loc[first_idx, 'Close']
+    first_open  = df.loc[first_idx, 'Open']
+    first_high  = df.loc[first_idx, 'High']
+    first_low   = df.loc[first_idx, 'Low']
+    first_bbl   = df.loc[first_idx, 'BBL']
+    first_bbm   = df.loc[first_idx, 'BBM']
 
    # --- find indices for the 3 checks (10:15, 12:00, 14:00) ---
     idx_t1 = idx_at_or_before(df, '10:15:00')   # check1
@@ -76,18 +82,29 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
 
    # --- trade-if-vwap-back style overrides at checkpoint granularity ---
    # (kept same logic pattern you used: first_high < mid_low -> override)
-    trade_if_vwap_back_t1 = (first_high < close_t1)
+    trade_if_vwap_back_t1 = (first_close < close_t1)
     trade_if_vwap_back_t2 = (first_close < close_t2) or (close_t1 < close_t2)
-    trade_if_vwap_back_t3 = (first_close < close_t3) or (close_t2 < close_t3)
+    trade_if_vwap_back_t3 = (close_t1 < close_t3) or (close_t2 < close_t3)
    # note: I used your 'last' rule for t3 to preserve previous 'last' logic; change if needed.
 
    # --- VWAP coming down checks (scalar per-check) ---
-    vwap_coming_down_t1 = (first_high > low_t1)
-    vwap_coming_down_t2 = (low_t1 > low_t2)
-    vwap_coming_down_t3 = (low_t2 > low_t3)  # or other measure if you prefer
+    vwap_coming_down_t1 = (first_close > low_t1)
+    vwap_coming_down_t2 = (low_t1 > low_t2) and (first_close > close_t2)  # or other measure if you prefer
+    vwap_coming_down_t3 = (low_t2 > low_t3) and (low_t1 > low_t3)  # or other measure if you prefer
 
    # --- Combine rules into per-row Series using time windows ---
-    allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow)  # scalar
+    # Check if first candle is red but next 3 candles are green with rising closes
+    green_continuation = (
+        (first_volume_profile == 0) &  # First candle is red
+        (df['volume_profile'].shift(-1) == 1) &  # 2nd candle is green (look ahead)
+        (df['volume_profile'].shift(-2) == 1) &  # 3rd candle is green
+        (df['volume_profile'].shift(-3) == 1) &  # 4th candle is green
+        (df['Close'].shift(-1) > df['Close']) &  # 2nd close > 1st close
+        (df['Close'].shift(-2) > df['Close'].shift(-1)) &  # 3rd close > 2nd close
+        (df['Close'].shift(-3) > df['Close'].shift(-2))  # 4th close > 3rd close
+    )
+    
+    allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow | green_continuation)  # scalar
 
    # time windows for applying each checkpoint rule
     t1_window = (df['Date'].dt.time > pd.to_datetime('10:14:00').time()) & (df['Date'].dt.time <= pd.to_datetime('11:59:00').time())

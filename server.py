@@ -180,7 +180,12 @@ def define_server(input, output, session):
     @reactive.event(input.show_login)
     def _show_login():
         try:
-            url = client.get_login_url()
+            redirect_uri = input.redirect_uri().strip()
+            if not redirect_uri:
+                redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", "").strip()
+            if not redirect_uri:
+                raise ValueError("Redirect URI is missing")
+            url = client.get_login_url(redirect_uri=redirect_uri)
             login_url.set(url)
             status_msg.set("[INFO] Login URL generated. Open in browser and complete auth.")
         except Exception as e:
@@ -209,7 +214,13 @@ def define_server(input, output, session):
             status_msg.set("[ERROR] Please provide auth code")
             return
         try:
-            tkn = client.exchange_token(code.strip())
+            redirect_uri = input.redirect_uri().strip()
+            if not redirect_uri:
+                redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", "").strip()
+            if not redirect_uri:
+                status_msg.set("[ERROR] Redirect URI is required for auth")
+                return
+            tkn = client.exchange_token(code.strip(), redirect_uri=redirect_uri)
             token.set(tkn)
             status_msg.set("[OK] Authenticated successfully! Token cached for 24h.")
         except Exception as e:
@@ -494,9 +505,13 @@ def define_server(input, output, session):
         if not live_fetch_enabled.get():
             return
         now = _dt.now()
-        if now.second != 0 or now.microsecond != 0:
-            delay = 60 - now.second - (now.microsecond / 1_000_000)
-            reactive.invalidate_later(max(delay, 0.5))
+        # Run 12 seconds after the minute boundary (i.e., at :12)
+        if now.second != 20:
+            if now.second < 20:
+                delay = 20 - now.second
+            else:
+                delay = 60 - now.second + 20
+            reactive.invalidate_later(max(delay, 1))
             return
         reactive.invalidate_later(60)
         _live_fetch_once()
@@ -545,7 +560,18 @@ def define_server(input, output, session):
             return
         last_traded_ts.set(ts_val)
 
-        buy_signal = bool(last_row.get("Buy_Signal", False))
+        buy_signal = (
+            bool(last_row.get('Buy_Signal', False)) or
+            bool(last_row.get('Mid_Buy_Signal', False)) or
+            bool(last_row.get('Mid_Buy_Signal_2', False)) or
+            bool(last_row.get('OverSold_Buy_Signal', False)) or
+            bool(last_row.get('RSI_Range_Buy_Signal', False)) or
+            bool(last_row.get('Super_Low_Buy_Signal', False)) or 
+            bool(last_row.get('Super_Low_Buy_Signal_2', False)) or 
+            bool(last_row.get('New_Uptrend_Buy_Signal', False)) or
+            bool(last_row.get('Downtrend_Reverse_Buy_Signal', False)) or 
+            bool(last_row.get('RSI_pct_buy', False))
+        )
         sell_signal = bool(last_row.get("Sell_Signal", False))
         logger.info(
             "Live trading check: latest=%s buy=%s sell=%s",

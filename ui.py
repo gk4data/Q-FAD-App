@@ -1,5 +1,6 @@
 # ui.py - UI/Layout definitions for Q-FAD Trading App (Mini Sidebar Layout + Auth UI)
 from datetime import date
+import os
 from shiny import ui
 from shinywidgets import output_widget
 
@@ -7,6 +8,7 @@ from shinywidgets import output_widget
 # ---------------- AUTH UI ----------------
 
 def create_auth_ui():
+    redirect_default = os.getenv("UPSTOX_REDIRECT_URI", "")
     return ui.div(
         ui.div(
             ui.h2(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD", style="text-align: center; margin-bottom: 8px;"),
@@ -16,6 +18,7 @@ def create_auth_ui():
         ui.div(
             ui.h4(ui.tags.i(class_="bi bi-shield-lock"), " Authentication"),
             ui.output_text_verbatim("auth_status"),
+            ui.input_text("redirect_uri", "Redirect URI", value=redirect_default, placeholder="https://your-app-url/callback"),
             ui.input_action_button("show_login", ui.HTML("<i class='bi bi-key'></i> Show Login URL"), class_="btn-primary", style="width: 100%; margin-bottom: 8px;"),
             ui.output_ui("login_url_display"),
             ui.input_text("auth_code", "Authorization Code", placeholder="Paste your auth code here"),

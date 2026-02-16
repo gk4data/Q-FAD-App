@@ -25,20 +25,22 @@ class UpstoxClient:
             return self.token_manager.load_token()
         return None
 
-    def get_login_url(self):
+    def get_login_url(self, redirect_uri=None):
+        uri = redirect_uri or self.redirect_uri
         return (
             f"{self.base_url}/login/authorization/dialog"
-            f"?response_type=code&client_id={self.client_id}&redirect_uri={self.redirect_uri}"
+            f"?response_type=code&client_id={self.client_id}&redirect_uri={uri}"
         )
 
-    def exchange_token(self, code: str):
+    def exchange_token(self, code: str, redirect_uri=None):
+        uri = redirect_uri or self.redirect_uri
         url = f"{self.base_url}/login/authorization/token"
         headers = {"accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
         data = {
             "code": code,
             "client_id": self.client_id,
             "client_secret": self.client_secret,
-            "redirect_uri": self.redirect_uri,
+            "redirect_uri": uri,
             "grant_type": "authorization_code",
         }
         r = requests.post(url, headers=headers, data=data, timeout=30)
