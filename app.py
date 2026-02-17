@@ -13,7 +13,9 @@ def main():
     """Initialize and run the Q-FAD Trading Application."""
     logging.basicConfig(
         level=logging.INFO,
-        format="[%(levelname)s] %(name)s: %(message)s"
+        format="[%(levelname)s] %(name)s: %(message)s",
+        handlers=[logging.StreamHandler()],
+        force=True,
     )
     app_ui = create_app_ui()
     

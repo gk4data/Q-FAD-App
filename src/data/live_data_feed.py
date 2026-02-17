@@ -102,7 +102,7 @@ class LiveDataRecorder:
             columns=["timestamp", "symbol", "open", "high", "low", "close", "volume"]
         )
         output_path = self._build_output_path(output_dir, instrument_key)
-        last_exchange_minute = None
+        last_saved_minute = {}
 
         while not self._stop_event.is_set():
             try:
@@ -173,6 +173,36 @@ class LiveDataRecorder:
                                     }
                                     ohlc_df.loc[len(ohlc_df)] = new_row
 
+                                last_minute = last_saved_minute.get(symbol)
+                                if last_minute != timestamp:
+                                    save_row = {
+                                        "timestamp": timestamp,
+                                        "symbol": symbol,
+                                        "open": candle.get("open"),
+                                        "high": candle.get("high"),
+                                        "low": candle.get("low"),
+                                        "close": candle.get("close"),
+                                        "volume": candle.get("vol", 0),
+                                    }
+                                    save_df = pd.DataFrame([save_row])
+                                    write_header = not os.path.exists(output_path)
+                                    save_df.to_csv(
+                                        output_path,
+                                        mode="a",
+                                        index=False,
+                                        header=write_header,
+                                    )
+                                    last_saved_minute[symbol] = timestamp
+                                    with self._lock:
+                                        self._last_save_path = output_path
+                                        self._last_save_time = datetime.now()
+                                    logger.info(
+                                        "Live data saved: %s %s to %s",
+                                        symbol,
+                                        timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                                        output_path,
+                                    )
+
                             if ohlc_data:
                                 last_candle = ohlc_data[-1]
                                 readable_ts = self._parse_timestamp(last_candle.get("ts"))
@@ -189,24 +219,6 @@ class LiveDataRecorder:
                                     last_candle.get("close"),
                                     last_candle.get("vol", 0),
                                 )
-                                if last_exchange_minute is None:
-                                    last_exchange_minute = current_minute
-                                elif current_minute != last_exchange_minute:
-                                    last_exchange_minute = current_minute
-                                    save_df = ohlc_df[ohlc_df["timestamp"] < current_minute]
-                                    if not save_df.empty:
-                                        save_df = save_df.drop_duplicates(
-                                            subset=["timestamp", "symbol"], keep="last"
-                                        ).sort_values(by="timestamp")
-                                        save_df.to_csv(output_path, index=False)
-                                        with self._lock:
-                                            self._last_save_path = output_path
-                                            self._last_save_time = datetime.now()
-                                        logger.info(
-                                            "Live data saved: %s rows to %s",
-                                            len(save_df),
-                                            output_path,
-                                        )
 
             except Exception as exc:
                 logger.warning("Live data websocket error: %s", exc)

@@ -680,9 +680,18 @@ def define_server(input, output, session):
                     "slice": False,
                 }
                 resp = sandbox_client.place_order(token_val, payload)
-                order_ids = resp.get("data", {}).get("order_ids", [])
-                entry_id = order_ids[0] if order_ids else None
-                _append_order_log("BUY", inst, qty, price, entry_id, "success", "Entry placed")
+                logger.info("Entry order response: %s", resp)
+                resp_status = resp.get("status", "")
+                entry_id = None
+                if resp_status == "success":
+                    order_ids = resp.get("data", {}).get("order_ids", [])
+                    entry_id = order_ids[0] if order_ids else None
+                    _append_order_log("BUY", inst, qty, price, entry_id, "success", f"Entry placed: {entry_id}")
+                else:
+                    error_msg = resp.get("errors", [{}])[0].get("message", resp.get("message", "Unknown error"))
+                    _append_order_log("BUY", inst, qty, price, None, "error", f"Entry failed: {error_msg}")
+                    trade_status_msg.set(f"[ERROR] Entry order failed: {error_msg}")
+                    return
 
                 sl_trigger = round(price * (1 - (sl_pct / 100.0)), 2) if price else 0
                 sl_payload = {
@@ -700,9 +709,18 @@ def define_server(input, output, session):
                     "slice": False,
                 }
                 sl_resp = sandbox_client.place_order(token_val, sl_payload)
-                sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
-                sl_id = sl_order_ids[0] if sl_order_ids else None
-                _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", "Stop loss placed")
+                logger.info("SL order response: %s", sl_resp)
+                sl_status = sl_resp.get("status", "")
+                sl_id = None
+                if sl_status == "success":
+                    sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
+                    sl_id = sl_order_ids[0] if sl_order_ids else None
+                    _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", f"Stop loss placed: {sl_id}")
+                else:
+                    error_msg = sl_resp.get("errors", [{}])[0].get("message", sl_resp.get("message", "Unknown error"))
+                    _append_order_log("SL", inst, qty, sl_trigger, None, "error", f"SL failed: {error_msg}")
+                    trade_status_msg.set(f"[ERROR] Stop loss order failed: {error_msg}")
+                    return
 
                 position_state.set({
                     "open": True,
@@ -738,9 +756,18 @@ def define_server(input, output, session):
                     "slice": False,
                 }
                 exit_resp = sandbox_client.place_order(token_val, exit_payload)
-                exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
-                exit_id = exit_order_ids[0] if exit_order_ids else None
-                _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", "Exit placed")
+                logger.info("Exit order response: %s", exit_resp)
+                exit_status = exit_resp.get("status", "")
+                exit_id = None
+                if exit_status == "success":
+                    exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
+                    exit_id = exit_order_ids[0] if exit_order_ids else None
+                    _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", f"Exit placed: {exit_id}")
+                else:
+                    error_msg = exit_resp.get("errors", [{}])[0].get("message", exit_resp.get("message", "Unknown error"))
+                    _append_order_log("SELL", inst, state.get("qty"), price, None, "error", f"Exit failed: {error_msg}")
+                    trade_status_msg.set(f"[ERROR] Exit order failed: {error_msg}")
+                    return
 
                 position_state.set({
                     "open": False,
