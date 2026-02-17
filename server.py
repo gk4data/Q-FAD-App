@@ -314,11 +314,12 @@ def define_server(input, output, session):
         if not token.get():
             return
         symbol = input.select_symbol()
+        instr_type = input.select_type()
         logger.debug("_update_expiries triggered: symbol=%s, instruments_loaded=%s", symbol, instruments_loaded.get())
         if not symbol or not instruments_loaded.get():
             return
         try:
-            expiries = instrument_manager.get_expiry_dates(symbol)
+            expiries = instrument_manager.get_expiry_dates(symbol, instrument_type=instr_type)
             logger.debug("_update_expiries: fetched %s expiries for %s", len(expiries), symbol)
             available_expiries.set(expiries)
             selected_symbol.set(symbol)
@@ -356,12 +357,6 @@ def define_server(input, output, session):
         expiry = input.select_expiry()
         instr_type = input.select_type()
         logger.debug("_update_strikes triggered: symbol=%s, expiry=%s, type=%s", symbol, expiry, instr_type)
-
-        if instr_type and instr_type.upper() == 'FUT':
-            available_strikes.set([])
-            selected_expiry.set(expiry)
-            logger.debug("FUT selected -> available_strikes cleared")
-            return
 
         if not (symbol and expiry and instruments_loaded.get()):
             return

@@ -80,7 +80,25 @@ class InstrumentManager:
             self.focus_df = cached_data.get('focus_df')
             self.cache_timestamp = cached_data.get('timestamp')
             self.exchange = cached_data.get('exchange', self.exchange)
-            
+
+            # Re-apply current filters to cached data to avoid stale FUT/GOLD/SILVER
+            if self.df is not None and not self.df.empty and 'instrument_type' in self.df.columns:
+                self.fno_df = self.df[self.df['instrument_type'].astype(str).str.strip().isin(['CE', 'PE'])].copy()
+
+            if self.exchange == "MCX" and self.fno_df is not None and not self.fno_df.empty:
+                mcx_symbols = {"CRUDEOIL", "NATURALGAS"}
+                name_upper = self.fno_df['name'].astype(str).str.upper().str.strip()
+                self.focus_df = self.fno_df[name_upper.isin(mcx_symbols)].copy()
+            elif self.fno_df is not None and not self.fno_df.empty:
+                # NSE focus symbol (NIFTY only)
+                self.focus_df = self.fno_df[
+                    self.fno_df['name'].astype(str).str.upper().str.strip() == "NIFTY"
+                ].copy()
+            else:
+                self.focus_df = self.fno_df
+
+            self.nifty_df = self.focus_df
+
             logger.info("Loaded from cache (cached at: %s)", self.cache_timestamp)
             logger.info("Total FnO: %s", len(self.fno_df) if self.fno_df is not None else 0)
             logger.info("Popular symbols: %s", len(self.nifty_df) if self.nifty_df is not None else 0)
@@ -180,9 +198,9 @@ class InstrumentManager:
             if 'expiry' in self.df.columns:
                 self.df['expiry'] = self.df['expiry'].apply(self._convert_expiry_to_date)
 
-            # Ensure FnO rows and required columns
+            # Ensure option rows and required columns (CE/PE only)
             if 'instrument_type' in self.df.columns:
-                self.fno_df = self.df[self.df['instrument_type'].astype(str).str.strip().isin(['CE', 'PE', 'FUT'])].copy()
+                self.fno_df = self.df[self.df['instrument_type'].astype(str).str.strip().isin(['CE', 'PE'])].copy()
             else:
                 self.fno_df = self.df.copy()
 
@@ -271,18 +289,18 @@ class InstrumentManager:
                 self.df['expiry'] = self.df['expiry'].apply(self._convert_expiry_to_date)
                 logger.info("Sample expiries: %s", self.df['expiry'].unique()[:5])
             
-            # Filter 2: Keep only FnO (CE, PE, FUT)
-            logger.info("FnO instruments (CE, PE, FUT)...")
+            # Filter 2: Keep only options (CE, PE)
+            logger.info("Options instruments (CE, PE)...")
             self.fno_df = self.df[
-                (self.df['instrument_type'].astype(str).str.strip().isin(['CE', 'PE', 'FUT']))
+                (self.df['instrument_type'].astype(str).str.strip().isin(['CE', 'PE']))
             ].copy()
             
             logger.info("FnO count: %s", len(self.fno_df))
             
             # Filter 3: Exchange-specific focus symbols
             if exchange == "MCX":
-                logger.info("MCX focus symbols (CRUDEOIL, GOLD, NATURALGAS, SILVER)...")
-                mcx_symbols = {"CRUDEOIL", "GOLD", "NATURALGAS", "SILVER"}
+                logger.info("MCX focus symbols (CRUDEOIL, NATURALGAS)...")
+                mcx_symbols = {"CRUDEOIL", "NATURALGAS"}
                 name_upper = self.fno_df['name'].astype(str).str.upper().str.strip()
                 self.focus_df = self.fno_df[name_upper.isin(mcx_symbols)].copy()
             else:
@@ -291,8 +309,7 @@ class InstrumentManager:
                     self.fno_df['name'].astype(str).str.upper().str.strip() == "NIFTY"
                 ].copy()
 
-            if exchange != "MCX" and (self.focus_df is None or self.focus_df.empty):
-                self.focus_df = self.fno_df
+            # Do not fallback to all symbols for NSE; keep NIFTY-only focus
 
             self.nifty_df = self.focus_df
 
@@ -342,8 +359,8 @@ class InstrumentManager:
             logger.exception("Error in get_unique_symbols: %s", e)
             return []
     
-    def get_expiry_dates(self, symbol: Optional[str] = None) -> List[str]:
-        """Get unique expiry dates (uses FnO dataset when available)"""
+    def get_expiry_dates(self, symbol: Optional[str] = None, instrument_type: Optional[str] = None) -> List[str]:
+        """Get unique expiry dates (uses options dataset when available)"""
         df = None
         if self.focus_df is not None and not self.focus_df.empty:
             df = self.focus_df
@@ -359,6 +376,11 @@ class InstrumentManager:
             if symbol:
                 df_filtered = df_filtered[
                     df_filtered['name'].astype(str).str.upper() == symbol.upper()
+                ]
+
+            if instrument_type:
+                df_filtered = df_filtered[
+                    df_filtered['instrument_type'].astype(str).str.strip() == instrument_type
                 ]
 
             if df_filtered.empty:
@@ -378,7 +400,7 @@ class InstrumentManager:
             return []
 
     def get_strikes(self, symbol: str, expiry: str, instrument_type: Optional[str] = None) -> List[int]:
-        """Get unique strikes; returns empty list for FUT (no strike)"""
+        """Get unique strikes for options (CE/PE)"""
         df = None
         if self.focus_df is not None and not self.focus_df.empty:
             df = self.focus_df
@@ -409,10 +431,6 @@ class InstrumentManager:
 
             if df_filtered.empty:
                 logger.warning("No strikes found for %s %s %s", symbol, expiry, instrument_type)
-                return []
-
-            # FUT instruments typically have no strike prices
-            if instrument_type and instrument_type.upper() == 'FUT':
                 return []
 
             strikes = sorted(

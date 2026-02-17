@@ -63,7 +63,7 @@ def instrument_selector_card():
         ui.output_ui("expiry_selector"),
         ui.input_radio_buttons(
             "select_type", "Type",
-            choices={"CE": "Call", "PE": "Put", "FUT": "Futures"},
+            choices={"CE": "Call", "PE": "Put"},
             selected="CE", inline=True
         ),
         ui.output_ui("strike_selector"),
