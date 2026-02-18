@@ -154,7 +154,11 @@ def create_main_ui():
         ui.div(
             ui.div(ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algorithmic Trading Platform", style="margin:0;"), class_="topbar-left"),
             ui.div(
-                ui.h6(ui.tags.i(class_="bi bi-broadcast"), " SYSTEM STATUS", style="margin:0;"),
+                ui.div(
+                    ui.div(ui.output_ui("live_trading_indicator"), class_="topbar-live-wrap"),
+                    ui.h6(ui.tags.i(class_="bi bi-broadcast"), " SYSTEM STATUS", style="margin:0;"),
+                    class_="topbar-status-row",
+                ),
                 ui.output_text_verbatim("status"),
                 class_="topbar-right"
             ),

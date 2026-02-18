@@ -159,6 +159,21 @@ def define_server(input, output, session):
         return trade_status_msg.get()
 
     @output
+    @render.ui
+    def live_trading_indicator():
+        if live_trading_enabled.get():
+            return ui.div(
+                ui.tags.span(class_="live-dot"),
+                ui.tags.span("LIVE", class_="live-label"),
+                class_="live-indicator live-indicator-on",
+            )
+        return ui.div(
+            ui.tags.span(class_="live-dot"),
+            ui.tags.span("LIVE OFF", class_="live-label"),
+            class_="live-indicator live-indicator-off",
+        )
+
+    @output
     @render.text
     def position_status():
         state = position_state.get() or {}
@@ -648,6 +663,7 @@ def define_server(input, output, session):
                     logger.warning("WebSocket CSV: skipping signals (no 09:15 candle found)")
                 df = filter_to_current_day(df, target_date_str)
                 df_data.set(df.copy())
+                _maybe_execute_trade(df)
                 websocket_last_processed_counter.set(live_save_counter)
                 websocket_chart_tick.set(websocket_chart_tick.get() + 1)
             except Exception as exc:
@@ -675,7 +691,7 @@ def define_server(input, output, session):
     def _maybe_execute_trade(df):
         if not live_trading_enabled.get():
             return
-        if not live_fetch_enabled.get():
+        if not (live_fetch_enabled.get() or websocket_csv_enabled.get()):
             return
         if df is None or df.empty:
             return

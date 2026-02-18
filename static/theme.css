@@ -47,6 +47,58 @@ nav {
   margin-right: -15px;
 }
 
+.topbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
+}
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+}
+
+.live-indicator .live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.live-indicator-on {
+  color: #ffd8d8;
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.live-indicator-on .live-dot {
+  background: #ff2b2b;
+  box-shadow: 0 0 10px rgba(255, 43, 43, 0.9);
+  animation: live-blink 1s steps(1, end) infinite;
+}
+
+.live-indicator-off {
+  color: var(--text-muted);
+  background: var(--bg-panel-2);
+}
+
+.live-indicator-off .live-dot {
+  background: #5c6574;
+}
+
+@keyframes live-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.2; }
+}
+
 /* Layout */
 .app-layout {
   padding: 12px 18px;
@@ -211,6 +263,18 @@ table {
   color: #e8e5f2;
   background: transparent;
   border: 0;
+}
+
+.topbar-live-wrap {
+  margin-right: 10px;
+  margin-bottom: 0;
+}
+
+.topbar-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
 }
 
 /* Selected instrument badge */

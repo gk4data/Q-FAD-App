@@ -307,7 +307,7 @@ def plot_signals(df):
     # ===== Layout - Professional Light-Gray Theme =====
     fig.update_layout(
         title=dict(
-            text="<b>Q-FAD Algo HFT Trading</b>",
+            text="<b>Q-FAD Trading Console </b>",
             font=dict(size=20, color="#1a1a1a", family="Arial Black"),
             x=0.5,
             xanchor="center"
