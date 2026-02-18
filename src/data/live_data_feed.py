@@ -29,6 +29,7 @@ class LiveDataRecorder:
         self._last_error = None
         self._last_save_path = None
         self._last_save_time = None
+        self._live_save_counter = 0
         self._instrument_key = None
 
     def start(self, access_token, instrument_key, output_dir, mode="full", save_interval=60):
@@ -43,6 +44,7 @@ class LiveDataRecorder:
             self._last_error = None
             self._last_save_path = None
             self._last_save_time = None
+            self._live_save_counter = 0
             self._instrument_key = instrument_key
             self._running = True
 
@@ -83,6 +85,17 @@ class LiveDataRecorder:
         last_save_str = last_save.strftime("%Y-%m-%d %H:%M:%S") if last_save else "--"
         path_str = last_path or "--"
         return f"[OK] Live data running | {instrument} | last save: {last_save_str} | {path_str}"
+
+    def live_save_snapshot(self):
+        """Return current live-save event state for server-triggered processing."""
+        with self._lock:
+            return {
+                "counter": self._live_save_counter,
+                "last_save_time": self._last_save_time,
+                "last_save_path": self._last_save_path,
+                "running": self._running,
+                "error": self._last_error,
+            }
 
     def _run(self, access_token, instrument_key, output_dir, mode, save_interval):
         try:
@@ -201,6 +214,7 @@ class LiveDataRecorder:
                                     with self._lock:
                                         self._last_save_path = output_path
                                         self._last_save_time = datetime.now()
+                                        self._live_save_counter += 1
                                     logger.info(
                                         "Live data saved: %s %s to %s",
                                         symbol,
@@ -264,7 +278,8 @@ class LiveDataRecorder:
                 raw_df, instrument_key, access_token, target_date_str,
                 interval=interval, mode="date_range"
             )
-            df = filter_to_current_day(raw_df, target_date_str)
+            # Keep previous-day rows in the CSV for indicator warm-up
+            df = raw_df.copy()
             if df.empty:
                 logger.info("WebSocket backfill: no current-day rows after filter")
                 return

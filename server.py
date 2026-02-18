@@ -64,6 +64,9 @@ def define_server(input, output, session):
     trade_status_msg = reactive.Value("[INFO] Live trading idle")
     live_trading_enabled = reactive.Value(False)
     live_fetch_enabled = reactive.Value(False)
+    websocket_csv_enabled = reactive.Value(False)
+    websocket_last_processed_counter = reactive.Value(0)
+    websocket_chart_tick = reactive.Value(0)
     last_signal_key = reactive.Value(None)
     last_traded_ts = reactive.Value(None)
     order_log = reactive.Value(pd.DataFrame(columns=[
@@ -435,15 +438,20 @@ def define_server(input, output, session):
 
     @reactive.effect
     def _poll_live_status():
-        reactive.invalidate_later(2000)
+        reactive.invalidate_later(2)
         if live_fetch_enabled.get():
             return
         live_status_msg.set("[INFO] Live fetch idle")
 
     @reactive.effect
     def _poll_websocket_status():
-        reactive.invalidate_later(2000)
+        reactive.invalidate_later(2)
         websocket_status_msg.set(live_recorder.status())
+
+    def _get_websocket_csv_path():
+        output_dir = input.websocket_save_dir().strip()
+        base_dir = output_dir or os.path.join(os.getcwd(), "live_data")
+        return os.path.join(base_dir, "live_data_websocket.csv")
 
     def _live_fetch_once():
         if not token.get():
@@ -553,12 +561,100 @@ def define_server(input, output, session):
             token.get(), inst, output_dir or None, mode="full", save_interval=60
         )
         websocket_status_msg.set("[OK] WebSocket started" if ok else f"[ERROR] {message}")
+        if ok:
+            websocket_csv_enabled.set(True)
+            websocket_last_processed_counter.set(0)
+            df_data.set(pd.DataFrame())
+            websocket_chart_tick.set(websocket_chart_tick.get() + 1)
 
     @reactive.effect
     @reactive.event(input.stop_websocket)
     def _stop_websocket():
         ok, message = live_recorder.stop()
         websocket_status_msg.set("[OK] WebSocket stopped" if ok else f"[INFO] {message}")
+        websocket_csv_enabled.set(False)
+        websocket_last_processed_counter.set(0)
+
+    @reactive.effect
+    def _websocket_csv_loop():
+        try:
+            if not websocket_csv_enabled.get():
+                return
+            snapshot = live_recorder.live_save_snapshot()
+            live_save_counter = int(snapshot.get("counter", 0) or 0)
+            if live_save_counter <= websocket_last_processed_counter.get():
+                return
+
+            path = snapshot.get("last_save_path") or _get_websocket_csv_path()
+            if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+                websocket_last_processed_counter.set(live_save_counter)
+                return
+
+            try:
+                raw_df = pd.read_csv(path)
+            except Exception as exc:
+                logger.warning("WebSocket CSV read error: %s", exc)
+                return
+
+            required = {"timestamp", "open", "high", "low", "close", "volume"}
+            if not required.issubset(set(raw_df.columns)):
+                logger.warning("WebSocket CSV missing columns: %s", sorted(required - set(raw_df.columns)))
+                return
+
+            df = raw_df.copy()
+            df["Date"] = pd.to_datetime(df["timestamp"], errors="coerce")
+            if getattr(df["Date"].dt, "tz", None) is not None:
+                df["Date"] = df["Date"].dt.tz_localize(None)
+            df.rename(
+                columns={
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
+                },
+                inplace=True,
+            )
+            df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Date"])
+            df = df.sort_values("Date").reset_index(drop=True)
+            if df.empty:
+                websocket_last_processed_counter.set(live_save_counter)
+                return
+
+            target_date_str = _as_iso(_dt.now().date())
+            try:
+                inst = selected_instrument_key.get() or input.instrument().strip()
+                # If CSV already contains previous-day rows, skip concatenation
+                has_prev_day = False
+                try:
+                    min_date = df["Date"].dt.date.min()
+                    max_date = df["Date"].dt.date.max()
+                    target_date = _dt.strptime(target_date_str, "%Y-%m-%d").date()
+                    has_prev_day = (min_date is not None and max_date is not None and min_date < target_date <= max_date)
+                except Exception:
+                    has_prev_day = False
+                if inst and token.get() and not has_prev_day:
+                    df = concatenate_with_previous_day(
+                        df, inst, token.get(), target_date_str,
+                        interval="1minute", mode="date_range"
+                    )
+                df = calculate_indicators(df)
+                df = detect_regimes_relaxed(df)
+                df = classify_trend_by_angles(df)
+                has_915 = (df["Date"].dt.time == _dt.strptime("09:15:00", "%H:%M:%S").time()).any()
+                if has_915:
+                    df = add_long_signal(df)
+                else:
+                    logger.warning("WebSocket CSV: skipping signals (no 09:15 candle found)")
+                df = filter_to_current_day(df, target_date_str)
+                df_data.set(df.copy())
+                websocket_last_processed_counter.set(live_save_counter)
+                websocket_chart_tick.set(websocket_chart_tick.get() + 1)
+            except Exception as exc:
+                logger.exception("WebSocket CSV processing error: %s", exc)
+                return
+        finally:
+            reactive.invalidate_later(1)
 
     def _append_order_log(action, instrument, qty, price, order_id, status, message):
         df = order_log.get()
@@ -1034,7 +1130,7 @@ def define_server(input, output, session):
     @output
     @render_plotly
     def price_plot():
-        reactive.invalidate_later(2000)
+        _ = websocket_chart_tick.get()
         df = df_data.get()
         if df is None or df.empty:
             fig = go.Figure()
@@ -1044,6 +1140,7 @@ def define_server(input, output, session):
             return plot_signals(df)
         except Exception as e:
             traceback.print_exc()
+            logger.exception("Chart render error: %s", e)
             fig = go.Figure()
             fig.update_layout(title=f"Plot error: {e}", height=700)
             return fig

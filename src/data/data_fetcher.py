@@ -136,6 +136,13 @@ def concatenate_with_previous_day(
         if prev_df.empty:
             print(f"[WARN] No data found for previous market day {prev_market_day}. Using current data only.")
             return current_df.copy()
+
+        # Normalize timezones to avoid tz-aware vs tz-naive comparisons
+        for _df in (current_df, prev_df):
+            if "Date" in _df.columns:
+                _df["Date"] = pd.to_datetime(_df["Date"], errors="coerce")
+                if getattr(_df["Date"].dt, "tz", None) is not None:
+                    _df["Date"] = _df["Date"].dt.tz_localize(None)
         
         # Keep only last N rows from previous day
         prev_df = prev_df.tail(previous_rows).reset_index(drop=True)
@@ -244,7 +251,7 @@ def filter_to_current_day(df: pd.DataFrame, target_date_str: str) -> pd.DataFram
         # Filter to target date only
         filtered_df = df[df['Date'].dt.date == target_date].reset_index(drop=True)
         
-        print(f"[INFO] Filtered to {target_date}: {len(filtered_df)} rows")
+        # Keep logs quiet for live processing
         
         return filtered_df
     

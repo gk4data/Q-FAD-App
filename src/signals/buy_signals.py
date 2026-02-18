@@ -41,9 +41,16 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
    # This is important because df may include previous day data for indicator calculation
     first_915_rows = df[df['Date'].dt.time == pd.to_datetime('09:15:00').time()]
     if len(first_915_rows) == 0:
-        raise ValueError("No 9:15 candle found in data. Cannot determine day opening values.")
-    
-    first_idx = first_915_rows.index[0]
+        # Fallback: use first candle of the most recent trading day in the data
+        current_day = df['Date'].dt.date.max()
+        day_rows = df[df['Date'].dt.date == current_day]
+        if len(day_rows) == 0:
+            # Final fallback: use very first row
+            first_idx = df.index[0]
+        else:
+            first_idx = day_rows.index[0]
+    else:
+        first_idx = first_915_rows.index[0]
     first_volume_profile = df.loc[first_idx, 'volume_profile']
     first_close = df.loc[first_idx, 'Close']
     first_open  = df.loc[first_idx, 'Open']
