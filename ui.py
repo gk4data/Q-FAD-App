@@ -102,7 +102,6 @@ def data_processing_card():
 def live_data_card():
     return ui.div(
         ui.h5(ui.tags.i(class_="bi bi-record-circle"), " Live Data (REST API)"),
-        ui.input_text("live_save_dir", "Live Data Directory", value=""),
         ui.row(
             ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
@@ -114,7 +113,6 @@ def live_data_card():
 def websocket_card():
     return ui.div(
         ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (WebSocket)"),
-        ui.input_text("websocket_save_dir", "WebSocket Save Directory", value=""),
         ui.row(
             ui.column(6, ui.input_action_button("start_websocket", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_websocket", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),

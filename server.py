@@ -515,8 +515,7 @@ def define_server(input, output, session):
         websocket_status_msg.set(live_recorder.status())
 
     def _get_websocket_csv_path():
-        output_dir = input.websocket_save_dir().strip()
-        base_dir = output_dir or os.path.join(os.getcwd(), "live_data")
+        base_dir = os.path.join(os.getcwd(), "live_data")
         return os.path.join(base_dir, "live_data_websocket.csv")
 
     def _live_fetch_once():
@@ -622,9 +621,8 @@ def define_server(input, output, session):
             websocket_status_msg.set("[ERROR] Select an instrument before starting WebSocket")
             return
 
-        output_dir = input.websocket_save_dir().strip()
         ok, message = live_recorder.start(
-            token.get(), inst, output_dir or None, mode="full", save_interval=60
+            token.get(), inst, None, mode="full", save_interval=60
         )
         websocket_status_msg.set("[OK] WebSocket started" if ok else f"[ERROR] {message}")
         if ok:
