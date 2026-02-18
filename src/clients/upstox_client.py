@@ -56,14 +56,14 @@ class UpstoxClient:
         
         return self.access_token
 
-    def get_funds_and_margin(self, access_token: str, segment: str = "SEC"):
+    def get_funds_and_margin(self, access_token: str, segment: str | None = None):
         """Fetch account funds and margin snapshot."""
         url = f"{self.base_url}/user/get-funds-and-margin"
         headers = {
             "accept": "application/json",
             "Authorization": f"Bearer {access_token}",
         }
-        params = {"segment": segment}
+        params = {"segment": segment} if segment else None
         r = requests.get(url, headers=headers, params=params, timeout=30)
         r.raise_for_status()
         return r.json()

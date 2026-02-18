@@ -128,8 +128,16 @@ def define_server(input, output, session):
             funds_msg.set("[INFO] Funds: --")
             return
         try:
+            payload = client.get_funds_and_margin(tkn, segment=None)
+            funds_msg.set(_extract_funds_display(payload))
+            return
+        except Exception:
+            pass
+
+        try:
             payload = client.get_funds_and_margin(tkn, segment="SEC")
             funds_msg.set(_extract_funds_display(payload))
+            return
         except Exception as exc:
             logger.warning("Funds fetch failed: %s", exc)
             funds_msg.set("[WARN] --")
