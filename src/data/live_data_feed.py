@@ -11,6 +11,11 @@ import requests
 from google.protobuf.json_format import MessageToDict
 
 from .MarketDataFeedV3_pb2 import FeedResponse
+from .data_fetcher import (
+    fetch_intraday_data,
+    concatenate_with_previous_day,
+    filter_to_current_day,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +102,12 @@ class LiveDataRecorder:
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
-
         ohlc_df = pd.DataFrame(
             columns=["timestamp", "symbol", "open", "high", "low", "close", "volume"]
         )
         output_path = self._build_output_path(output_dir, instrument_key)
         last_saved_minute = {}
+        self._backfill_from_rest(access_token, instrument_key, output_path, last_saved_minute)
 
         while not self._stop_event.is_set():
             try:
@@ -237,11 +242,62 @@ class LiveDataRecorder:
         return response.json()
 
     def _build_output_path(self, output_dir, instrument_key):
-        safe_key = instrument_key.replace("|", "_").replace("/", "_")
         base_dir = output_dir or os.path.join(os.getcwd(), "live_data")
         os.makedirs(base_dir, exist_ok=True)
-        date_str = datetime.now().strftime("%Y%m%d")
-        return os.path.join(base_dir, f"live_data_{safe_key}_{date_str}.csv")
+        return os.path.join(base_dir, "live_data_websocket.csv")
+
+    def _backfill_from_rest(self, access_token, instrument_key, output_path, last_saved_minute):
+        """Seed the websocket CSV with REST intraday data (current day only)."""
+        try:
+            # Always reset the file on websocket start
+            open(output_path, "w").close()
+            interval = "1minute"
+            raw_df = fetch_intraday_data(
+                instrument_key, access_token, interval=interval, mode="intraday"
+            )
+            if raw_df is None or raw_df.empty:
+                logger.info("WebSocket backfill: no intraday data returned")
+                return
+
+            target_date_str = datetime.now().strftime("%Y-%m-%d")
+            raw_df = concatenate_with_previous_day(
+                raw_df, instrument_key, access_token, target_date_str,
+                interval=interval, mode="date_range"
+            )
+            df = filter_to_current_day(raw_df, target_date_str)
+            if df.empty:
+                logger.info("WebSocket backfill: no current-day rows after filter")
+                return
+
+            ts = pd.to_datetime(df["Date"], errors="coerce")
+            if getattr(ts.dt, "tz", None) is not None:
+                ts = ts.dt.tz_localize(None)
+            backfill_df = pd.DataFrame({
+                "timestamp": ts,
+                "symbol": instrument_key,
+                "open": df["Open"],
+                "high": df["High"],
+                "low": df["Low"],
+                "close": df["Close"],
+                "volume": df["Volume"],
+            })
+            backfill_df.to_csv(output_path, index=False)
+
+            last_ts = pd.to_datetime(backfill_df["timestamp"]).max()
+            if pd.notna(last_ts):
+                last_saved_minute[instrument_key] = last_ts.replace(second=0, microsecond=0)
+
+            with self._lock:
+                self._last_save_path = output_path
+                self._last_save_time = datetime.now()
+            logger.info(
+                "WebSocket backfill saved: rows=%s last=%s path=%s",
+                len(backfill_df),
+                last_ts.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(last_ts) else "--",
+                output_path,
+            )
+        except Exception as exc:
+            logger.warning("WebSocket backfill error: %s", exc)
 
     def _parse_timestamp(self, ts_value):
         if ts_value is None:
