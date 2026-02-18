@@ -152,7 +152,10 @@ def create_main_ui():
     return ui.page_fluid(
         # Top bar
         ui.div(
-            ui.div(ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algorithmic Trading Platform", style="margin:0;"), class_="topbar-left"),
+            ui.div(
+                ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algo Trading Platform", style="margin:0;"),
+                class_="topbar-left",
+            ),
             ui.div(
                 ui.div(
                     ui.div(ui.output_ui("live_trading_indicator"), class_="topbar-live-wrap"),
@@ -245,7 +248,8 @@ def create_main_ui():
             style="display:flex; gap:12px;"
         ),
         ui.div(
-            "Designed By Skyrock INC 2025-26",
+            ui.div("Designed By Skyrock INC 2025-26", class_="footer-left"),
+            ui.div(ui.output_ui("funds_indicator"), class_="footer-right"),
             class_="app-footer"
         )
     )

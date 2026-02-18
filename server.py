@@ -59,6 +59,7 @@ def define_server(input, output, session):
     initial_cash_used = reactive.Value(100000)
     login_url = reactive.Value("")
     status_msg = reactive.Value("Starting app...")
+    funds_msg = reactive.Value("[INFO] Funds: --")
     live_status_msg = reactive.Value("[INFO] Live data idle")
     websocket_status_msg = reactive.Value("[INFO] WebSocket idle")
     trade_status_msg = reactive.Value("[INFO] Live trading idle")
@@ -102,6 +103,37 @@ def define_server(input, output, session):
             return None
         return str(d).strip()
 
+    def _extract_funds_display(payload):
+        data = (payload or {}).get("data", {})
+        equity = data.get("equity", {}) if isinstance(data, dict) else {}
+        used = data.get("used_margin", {}) if isinstance(data, dict) else {}
+        available = (
+            equity.get("available_margin")
+            or equity.get("available")
+            or equity.get("net")
+            or equity.get("opening_balance")
+        )
+        if available is None and isinstance(used, dict):
+            available = used.get("available")
+        try:
+            if available is not None:
+                return f"[OK] INR {float(available):,.2f}"
+        except Exception:
+            pass
+        return "[WARN] --"
+
+    def _refresh_funds():
+        tkn = token.get()
+        if not tkn:
+            funds_msg.set("[INFO] Funds: --")
+            return
+        try:
+            payload = client.get_funds_and_margin(tkn, segment="SEC")
+            funds_msg.set(_extract_funds_display(payload))
+        except Exception as exc:
+            logger.warning("Funds fetch failed: %s", exc)
+            funds_msg.set("[WARN] --")
+
     # ===== Initialization =====
     @reactive.effect
     def _init():
@@ -110,6 +142,7 @@ def define_server(input, output, session):
         if cached:
             token.set(cached)
             status_msg.set("[OK] Using cached token (valid for 24h)")
+            _refresh_funds()
         else:
             status_msg.set("[INFO] No valid token. Click 'Show Login URL' to authenticate.")
 
@@ -157,6 +190,22 @@ def define_server(input, output, session):
     @render.text
     def trade_status():
         return trade_status_msg.get()
+
+    @output
+    @render.ui
+    def funds_indicator():
+        msg = funds_msg.get()
+        if msg.startswith("[OK]"):
+            return ui.div(
+                ui.tags.span("Funds", class_="funds-label"),
+                ui.tags.span(msg.replace("[OK]", "").strip(), class_="funds-value"),
+                class_="funds-indicator",
+            )
+        return ui.div(
+            ui.tags.span("Funds", class_="funds-label"),
+            ui.tags.span("--", class_="funds-value"),
+            class_="funds-indicator funds-indicator-off",
+        )
 
     @output
     @render.ui
@@ -249,6 +298,7 @@ def define_server(input, output, session):
             tkn = client.exchange_token(code.strip(), redirect_uri=redirect_uri)
             token.set(tkn)
             status_msg.set("[OK] Authenticated successfully! Token cached for 24h.")
+            _refresh_funds()
         except Exception as e:
             status_msg.set(f"[ERROR] Auth failed: {e}")
             traceback.print_exc()
@@ -259,6 +309,7 @@ def define_server(input, output, session):
         if client.token_manager:
             client.token_manager.clear_token()
         token.set(None)
+        funds_msg.set("[INFO] Funds: --")
         status_msg.set("[OK] Token cache cleared. Click 'Show Login URL' to re-authenticate.")
 
     @session.on_ended
@@ -517,9 +568,9 @@ def define_server(input, output, session):
 
             if input.auto_save():
                 base_dir = input.save_dir().strip() or None
-                path = save_to_csv(df, base_dir=base_dir)
+                save_to_csv(df, base_dir=base_dir)
                 live_status_msg.set(
-                    f"[OK] Live fetch updated ({len(df)} rows) last={last_ts_str}. Saved: {path}"
+                    f"[OK] Live fetch updated ({len(df)} rows) last={last_ts_str}"
                 )
             else:
                 live_status_msg.set(
@@ -838,6 +889,7 @@ def define_server(input, output, session):
                     "instrument": inst,
                 })
                 trade_status_msg.set("[OK] Entry + SL placed (sandbox)")
+                _refresh_funds()
 
             if sell_signal:
                 sl_id = state.get("sl_order_id")
@@ -885,6 +937,7 @@ def define_server(input, output, session):
                     "instrument": None,
                 })
                 trade_status_msg.set("[OK] Exit placed (sandbox)")
+                _refresh_funds()
 
             last_signal_key.set(signal_key)
 
@@ -1098,8 +1151,8 @@ def define_server(input, output, session):
 
             if input.auto_save():
                 base_dir = input.save_dir().strip() or None
-                path = save_to_csv(df, base_dir=base_dir)
-                status_msg.set(f"[OK] Fetched & processed {len(df)} rows (current day only). Saved: {path}")
+                save_to_csv(df, base_dir=base_dir)
+                status_msg.set(f"[OK] Fetched & processed {len(df)} rows (current day only).")
             else:
                 status_msg.set(f"[OK] Fetched & processed {len(df)} rows (current day only) successfully!")
 
