@@ -188,6 +188,40 @@ nav {
   border-color: var(--accent-blue);
 }
 
+/* Instant tooltips for mini sidebar icons */
+.mini-sidebar-radios label .mini-sidebar-icon {
+  position: relative;
+  display: inline-flex;
+}
+
+.mini-sidebar-radios label .mini-sidebar-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 58px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #101722;
+  color: #e5e7eb;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow-soft);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.08s ease;
+  z-index: 1000;
+}
+
+.mini-sidebar-radios label:hover .mini-sidebar-icon::after,
+.mini-sidebar-radios label:focus-within .mini-sidebar-icon::after {
+  opacity: 1;
+  visibility: visible;
+}
+
 /* Controls column */
 .controls-column {
   width: 340px;

@@ -60,10 +60,12 @@ def define_server(input, output, session):
     login_url = reactive.Value("")
     status_msg = reactive.Value("Starting app...")
     funds_msg = reactive.Value("[INFO] Funds: --")
+    funds_available = reactive.Value(None)
     live_status_msg = reactive.Value("[INFO] Live data idle")
     websocket_status_msg = reactive.Value("[INFO] WebSocket idle")
     trade_status_msg = reactive.Value("[INFO] Live trading idle")
     live_trading_enabled = reactive.Value(False)
+    live_trading_mode = reactive.Value(None)
     live_fetch_enabled = reactive.Value(False)
     websocket_csv_enabled = reactive.Value(False)
     websocket_last_processed_counter = reactive.Value(0)
@@ -71,16 +73,19 @@ def define_server(input, output, session):
     last_signal_key = reactive.Value(None)
     last_traded_ts = reactive.Value(None)
     order_log = reactive.Value(pd.DataFrame(columns=[
-        "time", "action", "instrument", "qty", "price", "order_id", "status", "message"
+        "time", "action", "instrument", "qty", "price", "fill_price", "pnl", "order_id", "status", "message"
     ]))
     position_state = reactive.Value({
         "open": False,
         "entry_order_id": None,
         "sl_order_id": None,
         "entry_price": None,
+        "entry_fill_price": None,
         "qty": 0,
         "instrument": None,
     })
+    pending_exit = reactive.Value(None)
+    last_realized_pnl = reactive.Value(None)
 
     # Instrument selector state
     instruments_loaded = reactive.Value(False)
@@ -122,14 +127,33 @@ def define_server(input, output, session):
             pass
         return "[WARN] --"
 
+    def _extract_funds_value(payload):
+        data = (payload or {}).get("data", {})
+        equity = data.get("equity", {}) if isinstance(data, dict) else {}
+        used = data.get("used_margin", {}) if isinstance(data, dict) else {}
+        available = (
+            equity.get("available_margin")
+            or equity.get("available")
+            or equity.get("net")
+            or equity.get("opening_balance")
+        )
+        if available is None and isinstance(used, dict):
+            available = used.get("available")
+        try:
+            return float(available) if available is not None else None
+        except Exception:
+            return None
+
     def _refresh_funds():
         tkn = token.get()
         if not tkn:
             funds_msg.set("[INFO] Funds: --")
+            funds_available.set(None)
             return
         try:
             payload = client.get_funds_and_margin(tkn, segment=None)
             funds_msg.set(_extract_funds_display(payload))
+            funds_available.set(_extract_funds_value(payload))
             return
         except Exception:
             pass
@@ -137,10 +161,12 @@ def define_server(input, output, session):
         try:
             payload = client.get_funds_and_margin(tkn, segment="SEC")
             funds_msg.set(_extract_funds_display(payload))
+            funds_available.set(_extract_funds_value(payload))
             return
         except Exception as exc:
             logger.warning("Funds fetch failed: %s", exc)
             funds_msg.set("[WARN] --")
+            funds_available.set(None)
 
     # ===== Initialization =====
     @reactive.effect
@@ -197,7 +223,22 @@ def define_server(input, output, session):
     @output
     @render.text
     def trade_status():
-        return trade_status_msg.get()
+        pnl_total = _get_total_pnl()
+        if pnl_total is None:
+            return trade_status_msg.get()
+        return f"{trade_status_msg.get()} | PnL: {pnl_total}"
+
+    def _get_total_pnl():
+        df = order_log.get()
+        if df is None or df.empty or "pnl" not in df.columns:
+            return None
+        try:
+            pnl_series = pd.to_numeric(df["pnl"], errors="coerce").dropna()
+            if pnl_series.empty:
+                return None
+            return round(float(pnl_series.sum()), 2)
+        except Exception:
+            return None
 
     @output
     @render.ui
@@ -235,11 +276,16 @@ def define_server(input, output, session):
     def position_status():
         state = position_state.get() or {}
         if not state.get("open"):
+            pnl = last_realized_pnl.get()
+            if pnl is not None:
+                return f"[INFO] No open position | Last PnL: {pnl}"
             return "[INFO] No open position"
         price = state.get("entry_price")
+        fill_price = state.get("entry_fill_price")
         qty = state.get("qty")
         inst = state.get("instrument")
-        return f"[OK] Open position: {inst} qty={qty} entry={price}"
+        fill_msg = f" fill={fill_price}" if fill_price else ""
+        return f"[OK] Open position: {inst} qty={qty} entry={price}{fill_msg}"
 
     @output
     @render.text
@@ -606,13 +652,13 @@ def define_server(input, output, session):
         _live_fetch_once()
 
     @reactive.effect
-    @reactive.event(input.start_live)
+    @reactive.event(input.start_live_data)
     def _start_live():
         live_fetch_enabled.set(True)
         _live_fetch_once()
 
     @reactive.effect
-    @reactive.event(input.stop_live)
+    @reactive.event(input.stop_live_data)
     def _stop_live():
         live_fetch_enabled.set(False)
         live_status_msg.set("[INFO] Live fetch stopped")
@@ -738,12 +784,58 @@ def define_server(input, output, session):
                 "instrument": instrument,
                 "qty": qty,
                 "price": price,
+                "fill_price": None,
+                "pnl": None,
                 "order_id": order_id,
                 "status": status,
                 "message": message,
             }
         ])
         order_log.set(pd.concat([df, entry], ignore_index=True))
+
+    def _update_order_log(order_id, **updates):
+        if not order_id:
+            return
+        df = order_log.get()
+        if df is None or df.empty:
+            return
+        idx = df.index[df["order_id"] == order_id]
+        if len(idx) == 0:
+            return
+        i = idx[-1]
+        for k, v in updates.items():
+            if k in df.columns:
+                df.at[i, k] = v
+        order_log.set(df)
+
+    def _use_production_trading():
+        mode = live_trading_mode.get()
+        return mode == "live"
+
+    def _get_trade_client_and_token():
+        if _use_production_trading():
+            tkn = token.get()
+            return client, tkn, True
+        tkn = _get_sandbox_token()
+        return sandbox_client, tkn, False
+
+    def _fetch_order_fill(order_id, access_token):
+        try:
+            payload = client.get_order_history(access_token, order_id)
+        except Exception:
+            return None, None, None
+        data = (payload or {}).get("data", [])
+        if not data:
+            return None, None, None
+        last = data[-1]
+        avg_price = last.get("average_price")
+        status = (last.get("status") or "").lower()
+        filled_qty = last.get("filled_quantity")
+        try:
+            avg_price = float(avg_price) if avg_price is not None else None
+        except Exception:
+            avg_price = None
+        return avg_price, status, filled_qty
 
     def _maybe_execute_trade(df):
         if not live_trading_enabled.get():
@@ -788,9 +880,12 @@ def define_server(input, output, session):
             last_signal_key.set(signal_key)
             return
 
-        token_val = _get_sandbox_token()
+        trade_client, token_val, is_production = _get_trade_client_and_token()
         if not token_val:
-            trade_status_msg.set("[ERROR] Missing sandbox token")
+            if is_production:
+                trade_status_msg.set("[ERROR] Missing production token (authenticate first)")
+            else:
+                trade_status_msg.set("[ERROR] Missing sandbox token")
             return
 
         inst = selected_instrument_key.get() or input.instrument().strip()
@@ -804,9 +899,14 @@ def define_server(input, output, session):
         except Exception:
             price = None
 
-        capital = input.trade_capital()
-        sl_pct = input.sl_percent()
-        product_type = input.product_type()
+        if _use_production_trading():
+            capital = funds_available.get() or 0
+            sl_pct = input.live_sl_percent()
+            product_type = input.live_product_type()
+        else:
+            capital = input.sandbox_capital()
+            sl_pct = input.sandbox_sl_percent()
+            product_type = input.sandbox_product_type()
         lot_size = instrument_manager.get_lot_size(inst)
         qty = _calculate_qty(price, capital, lot_size)
 
@@ -843,7 +943,7 @@ def define_server(input, output, session):
                     "is_amo": False,
                     "slice": False,
                 }
-                resp = sandbox_client.place_order(token_val, payload)
+                resp = trade_client.place_order(token_val, payload)
                 logger.info("Entry order response: %s", resp)
                 resp_status = resp.get("status", "")
                 entry_id = None
@@ -851,6 +951,8 @@ def define_server(input, output, session):
                     order_ids = resp.get("data", {}).get("order_ids", [])
                     entry_id = order_ids[0] if order_ids else None
                     _append_order_log("BUY", inst, qty, price, entry_id, "success", f"Entry placed: {entry_id}")
+                    if entry_id:
+                        _update_order_log(entry_id, fill_price=price, message=f"Entry placed @ {price}")
                 else:
                     error_msg = resp.get("errors", [{}])[0].get("message", resp.get("message", "Unknown error"))
                     _append_order_log("BUY", inst, qty, price, None, "error", f"Entry failed: {error_msg}")
@@ -872,7 +974,7 @@ def define_server(input, output, session):
                     "is_amo": False,
                     "slice": False,
                 }
-                sl_resp = sandbox_client.place_order(token_val, sl_payload)
+                sl_resp = trade_client.place_order(token_val, sl_payload)
                 logger.info("SL order response: %s", sl_resp)
                 sl_status = sl_resp.get("status", "")
                 sl_id = None
@@ -891,17 +993,20 @@ def define_server(input, output, session):
                     "entry_order_id": entry_id,
                     "sl_order_id": sl_id,
                     "entry_price": price,
+                    "entry_fill_price": None,
                     "qty": qty,
                     "instrument": inst,
                 })
-                trade_status_msg.set("[OK] Entry + SL placed (sandbox)")
+                last_realized_pnl.set(None)
+                mode_msg = "production" if is_production else "sandbox"
+                trade_status_msg.set(f"[OK] Entry + SL placed ({mode_msg})")
                 _refresh_funds()
 
             if sell_signal:
                 sl_id = state.get("sl_order_id")
                 if sl_id:
                     try:
-                        sandbox_client.cancel_order(token_val, sl_id)
+                        trade_client.cancel_order(token_val, sl_id)
                         _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "success", "SL canceled")
                     except Exception as cancel_exc:
                         _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "error", str(cancel_exc))
@@ -920,7 +1025,7 @@ def define_server(input, output, session):
                     "is_amo": False,
                     "slice": False,
                 }
-                exit_resp = sandbox_client.place_order(token_val, exit_payload)
+                exit_resp = trade_client.place_order(token_val, exit_payload)
                 logger.info("Exit order response: %s", exit_resp)
                 exit_status = exit_resp.get("status", "")
                 exit_id = None
@@ -928,21 +1033,43 @@ def define_server(input, output, session):
                     exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
                     exit_id = exit_order_ids[0] if exit_order_ids else None
                     _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", f"Exit placed: {exit_id}")
+                    entry_fill = state.get("entry_fill_price") or state.get("entry_price")
+                    est_pnl = None
+                    try:
+                        if entry_fill is not None and state.get("qty"):
+                            est_pnl = round((float(price) - float(entry_fill)) * float(state.get("qty")), 2)
+                    except Exception:
+                        est_pnl = None
+                    if exit_id:
+                        _update_order_log(exit_id, fill_price=price, pnl=est_pnl, message=f"Exit placed @ {price}")
+                    last_realized_pnl.set(est_pnl)
                 else:
                     error_msg = exit_resp.get("errors", [{}])[0].get("message", exit_resp.get("message", "Unknown error"))
                     _append_order_log("SELL", inst, state.get("qty"), price, None, "error", f"Exit failed: {error_msg}")
                     trade_status_msg.set(f"[ERROR] Exit order failed: {error_msg}")
                     return
 
+                entry_fill = state.get("entry_fill_price") or state.get("entry_price")
+                if exit_id:
+                    pending_exit.set({
+                        "exit_order_id": exit_id,
+                        "entry_fill_price": entry_fill,
+                        "qty": state.get("qty"),
+                        "instrument": inst,
+                        "placed_price": price,
+                        "is_production": is_production,
+                    })
                 position_state.set({
                     "open": False,
                     "entry_order_id": None,
                     "sl_order_id": None,
                     "entry_price": None,
+                    "entry_fill_price": None,
                     "qty": 0,
                     "instrument": None,
                 })
-                trade_status_msg.set("[OK] Exit placed (sandbox)")
+                mode_msg = "production" if is_production else "sandbox"
+                trade_status_msg.set(f"[OK] Exit placed ({mode_msg})")
                 _refresh_funds()
 
             last_signal_key.set(signal_key)
@@ -966,20 +1093,89 @@ def define_server(input, output, session):
         return os.getenv("UPSTOX_SANDBOX_TOKEN", "").strip()
 
     @reactive.effect
-    @reactive.event(input.start_trading)
-    def _start_trading():
+    @reactive.event(input.start_sandbox)
+    def _start_sandbox_trading():
         token_val = _get_sandbox_token()
         if not token_val:
             trade_status_msg.set("[ERROR] Provide sandbox token to start trading")
             return
+        live_trading_mode.set("sandbox")
         live_trading_enabled.set(True)
-        trade_status_msg.set("[OK] Live trading enabled (sandbox)")
+        trade_status_msg.set("[OK] Sandbox trading enabled")
 
     @reactive.effect
-    @reactive.event(input.stop_trading)
-    def _stop_trading():
+    @reactive.event(input.stop_sandbox)
+    def _stop_sandbox_trading():
         live_trading_enabled.set(False)
+        live_trading_mode.set(None)
+        trade_status_msg.set("[INFO] Sandbox trading stopped")
+
+    @reactive.effect
+    @reactive.event(input.start_live)
+    def _start_live_trading():
+        if not input.confirm_live_trading():
+            trade_status_msg.set("[ERROR] Confirm live trading checkbox before starting")
+            return
+        if not token.get():
+            trade_status_msg.set("[ERROR] Authenticate to use live trading")
+            return
+        if not funds_available.get():
+            trade_status_msg.set("[ERROR] Funds unavailable; refresh or login again")
+            return
+        live_trading_mode.set("live")
+        live_trading_enabled.set(True)
+        trade_status_msg.set("[OK] Live trading enabled (production)")
+
+    @reactive.effect
+    @reactive.event(input.stop_live)
+    def _stop_live_trading():
+        live_trading_enabled.set(False)
+        live_trading_mode.set(None)
         trade_status_msg.set("[INFO] Live trading stopped")
+
+    @reactive.effect
+    def _resolve_live_fills():
+        if not live_trading_enabled.get():
+            reactive.invalidate_later(3)
+            return
+        if not _use_production_trading():
+            reactive.invalidate_later(3)
+            return
+        access_token = token.get()
+        if not access_token:
+            reactive.invalidate_later(3)
+            return
+
+        state = position_state.get() or {}
+        entry_id = state.get("entry_order_id")
+        if entry_id and not state.get("entry_fill_price"):
+            avg_price, status, _ = _fetch_order_fill(entry_id, access_token)
+            if avg_price and ("complete" in status or "filled" in status):
+                position_state.set({
+                    **state,
+                    "entry_fill_price": avg_price,
+                    "entry_price": avg_price,
+                })
+                _update_order_log(entry_id, fill_price=avg_price, message=f"Entry filled @ {avg_price}")
+
+        pending = pending_exit.get()
+        if pending and pending.get("exit_order_id"):
+            exit_id = pending.get("exit_order_id")
+            avg_price, status, _ = _fetch_order_fill(exit_id, access_token)
+            if avg_price and ("complete" in status or "filled" in status):
+                entry_fill = pending.get("entry_fill_price")
+                qty = pending.get("qty") or 0
+                pnl = None
+                try:
+                    if entry_fill is not None and qty:
+                        pnl = round((avg_price - float(entry_fill)) * float(qty), 2)
+                except Exception:
+                    pnl = None
+                _update_order_log(exit_id, fill_price=avg_price, pnl=pnl, message=f"Exit filled @ {avg_price}")
+                last_realized_pnl.set(pnl)
+                pending_exit.set(None)
+
+        reactive.invalidate_later(3)
 
     @output
     @render.ui

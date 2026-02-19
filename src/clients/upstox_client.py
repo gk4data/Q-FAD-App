@@ -13,6 +13,7 @@ class UpstoxClient:
         self.client_secret = os.getenv("UPSTOX_CLIENT_SECRET")
         self.redirect_uri = os.getenv("UPSTOX_REDIRECT_URI")
         self.base_url = "https://api.upstox.com/v2"
+        self.base_url_v3 = "https://api-hft.upstox.com/v3"
         self.access_token = None
         
         # Token caching
@@ -65,5 +66,40 @@ class UpstoxClient:
         }
         params = {"segment": segment} if segment else None
         r = requests.get(url, headers=headers, params=params, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def place_order(self, access_token: str, payload: dict):
+        """Place order using v3 order API."""
+        url = f"{self.base_url_v3}/order/place"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def cancel_order(self, access_token: str, order_id: str):
+        """Cancel order using v3 order API."""
+        url = f"{self.base_url_v3}/order/cancel"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        r = requests.delete(url, headers=headers, params={"order_id": order_id}, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def get_order_history(self, access_token: str, order_id: str):
+        """Fetch order history for a specific order id."""
+        url = f"{self.base_url}/order/history"
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        r = requests.get(url, headers=headers, params={"order_id": order_id}, timeout=30)
         r.raise_for_status()
         return r.json()

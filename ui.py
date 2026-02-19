@@ -4,6 +4,8 @@ import os
 from shiny import ui
 from shinywidgets import output_widget
 
+SIDEBAR_HEADER_STYLE = "text-align:center; font-weight:700; font-size:1.15rem;"
+
 
 # ---------------- AUTH UI ----------------
 
@@ -41,7 +43,7 @@ def create_auth_ui():
 
 def instrument_loader_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-collection"), " Instrument Loader"),
+        ui.h5(ui.tags.i(class_="bi bi-collection"), " Instrument Loader", style=SIDEBAR_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("load_instruments", ui.HTML("<i class='bi bi-arrow-clockwise'></i> Load"), class_="btn-info btn-sm")),
             ui.column(6, ui.input_checkbox("auto_load_instruments", "Auto-load", value=True)),
@@ -52,7 +54,7 @@ def instrument_loader_card():
 
 def instrument_selector_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-search"), " Instrument Selector"),
+        ui.h5(ui.tags.i(class_="bi bi-search"), " Instrument Selector", style=SIDEBAR_HEADER_STYLE),
         ui.input_select(
             "exchange",
             "Exchange",
@@ -76,7 +78,7 @@ def instrument_selector_card():
 
 def data_processing_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-graph-up"), " Data & Processing"),
+        ui.h5(ui.tags.i(class_="bi bi-graph-up"), " Data & Processing", style=SIDEBAR_HEADER_STYLE),
         ui.input_text("instrument", "Instrument Key", value="NSE_FO|40088"),
         ui.input_select("interval", "Timeframe", choices=["1minute", "5minute", "15minute"], selected="1minute"),
         ui.input_radio_buttons(
@@ -101,10 +103,10 @@ def data_processing_card():
 
 def live_data_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-record-circle"), " Live Data (REST API)"),
+        ui.h5(ui.tags.i(class_="bi bi-record-circle"), " Live Data (REST API)", style=SIDEBAR_HEADER_STYLE),
         ui.row(
-            ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
-            ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+            ui.column(6, ui.input_action_button("start_live_data", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
+            ui.column(6, ui.input_action_button("stop_live_data", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
         ui.output_text_verbatim("live_status"),
     )
@@ -112,7 +114,7 @@ def live_data_card():
 
 def websocket_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (WebSocket)"),
+        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (WebSocket)", style=SIDEBAR_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_websocket", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_websocket", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
@@ -123,22 +125,34 @@ def websocket_card():
 
 def live_trading_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-flask"), " Live Trading (Sandbox)"),
+        ui.h6("Sandbox Trading", style=SIDEBAR_HEADER_STYLE),
         ui.input_password("sandbox_token", "Sandbox Token"),
-        ui.input_numeric("trade_capital", "Available Capital", value=1000, min=1),
-        ui.input_numeric("sl_percent", "Stop Loss %", value=15, min=1, max=50),
-        ui.input_select("product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
+        ui.input_numeric("sandbox_capital", "Available Capital", value=1000, min=1),
+        ui.input_numeric("sandbox_sl_percent", "Stop Loss %", value=15, min=1, max=50),
+        ui.input_select("sandbox_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
         ui.row(
-            ui.column(6, ui.input_action_button("start_trading", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
-            ui.column(6, ui.input_action_button("stop_trading", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+            ui.column(6, ui.input_action_button("start_sandbox", ui.HTML("<i class='bi bi-play-fill'></i> Start Sandbox"), class_="btn-success")),
+            ui.column(6, ui.input_action_button("stop_sandbox", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
+
+        ui.tags.hr(),
+
+        ui.h6("Live Trading (Production)", style=SIDEBAR_HEADER_STYLE),
+        ui.input_checkbox("confirm_live_trading", "I understand this will place real orders", value=False),
+        ui.input_numeric("live_sl_percent", "Stop Loss %", value=15, min=1, max=50),
+        ui.input_select("live_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
+        ui.row(
+            ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start Live"), class_="btn-warning")),
+            ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+        ),
+
         ui.output_text_verbatim("trade_status"),
     )
 
 
 def backtesting_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-bullseye"), " Backtesting"),
+        ui.h5(ui.tags.i(class_="bi bi-bullseye"), " Backtesting", style=SIDEBAR_HEADER_STYLE),
         ui.input_numeric("initial_cash", "Initial Capital", value=100000, min=1000, max=10000000),
         ui.input_action_button("run_backtest", ui.HTML("<i class='bi bi-play-circle'></i> Run Backtest"), class_="btn-warning", style="width:100%"),
     )
@@ -175,11 +189,11 @@ def create_main_ui():
                         "sidebar_mode",
                         label="",
                        choices={
-                        "controls": ui.HTML('<i class="bi bi-sliders"></i>'),
-                        "data": ui.HTML('<i class="bi bi-folder2-open"></i>'),
-                        "live_trading": ui.HTML('<i class="bi bi-lightning-charge"></i>'),
-                        "backtest": ui.HTML('<i class="bi bi-graph-up"></i>'),
-                        "logout": ui.HTML('<i class="bi bi-box-arrow-right"></i>'),
+                        "controls": ui.HTML('<span class="mini-sidebar-icon" data-tooltip="Controls"><i class="bi bi-sliders"></i></span>'),
+                        "data": ui.HTML('<span class="mini-sidebar-icon" data-tooltip="Data & Processing"><i class="bi bi-folder2-open"></i></span>'),
+                        "live_trading": ui.HTML('<span class="mini-sidebar-icon" data-tooltip="Live Trading"><i class="bi bi-lightning-charge"></i></span>'),
+                        "backtest": ui.HTML('<span class="mini-sidebar-icon" data-tooltip="Backtesting"><i class="bi bi-graph-up"></i></span>'),
+                        "logout": ui.HTML('<span class="mini-sidebar-icon" data-tooltip="Logout & Session"><i class="bi bi-box-arrow-right"></i></span>'),
                         },
                         selected="controls",
                         inline=False
@@ -221,7 +235,7 @@ def create_main_ui():
                 ui.panel_conditional(
                     "input.sidebar_mode === 'logout'",
                     ui.div(
-                        ui.h5(ui.tags.i(class_="bi bi-shield-lock"), " Logout & Session"),
+                        ui.h5(ui.tags.i(class_="bi bi-shield-lock"), " Logout & Session", style=SIDEBAR_HEADER_STYLE),
                         ui.input_action_button("clear_cache", ui.HTML("<i class='bi bi-box-arrow-right'></i> Logout"), class_="btn-danger", style="width:100%"),
                         class_="sidebar-card"
                     )
