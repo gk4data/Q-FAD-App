@@ -75,6 +75,8 @@ def define_server(input, output, session):
     order_history_data = reactive.Value(pd.DataFrame())
     order_history_status_msg = reactive.Value("[INFO] Click 'Fetch Today's Orders' to load history")
     order_history_totals = reactive.Value({"pnl": None, "pct": None, "rows": None})
+    historical_orders_data = reactive.Value(pd.DataFrame())
+    historical_orders_status_msg = reactive.Value("[INFO] Historical data will appear after saving Order History")
     order_log = reactive.Value(pd.DataFrame(columns=[
         "time", "action", "instrument", "qty", "price", "fill_price", "entry_price_ref", "pnl", "pnl_pct", "order_id", "status", "message"
     ]))
@@ -105,6 +107,7 @@ def define_server(input, output, session):
     selected_strike = reactive.Value(None)
     selected_instrument_key = reactive.Value(None)
     selected_exchange = reactive.Value("NSE")
+    historical_file_path = os.path.join(os.getcwd(), "live_data", "historical_orders.csv")
 
 
     # ===== Utility Functions =====
@@ -115,6 +118,64 @@ def define_server(input, output, session):
         if d is None:
             return None
         return str(d).strip()
+
+    def _load_historical_orders_df():
+        if not os.path.exists(historical_file_path):
+            return pd.DataFrame()
+        try:
+            df = pd.read_csv(historical_file_path)
+            return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+
+    def _save_historical_orders_df(df):
+        os.makedirs(os.path.dirname(historical_file_path), exist_ok=True)
+        df.to_csv(historical_file_path, index=False)
+
+    def _build_historical_view(df):
+        if df is None or df.empty:
+            return pd.DataFrame()
+        out = df.copy()
+        for c in ["capital_invested", "realized_pnl", "pnl_pct", "trades"]:
+            if c in out.columns:
+                out[c] = pd.to_numeric(out[c], errors="coerce")
+        out["capital_invested"] = out["capital_invested"].round(2)
+        out["realized_pnl"] = out["realized_pnl"].round(2)
+        out["pnl_pct"] = out["pnl_pct"].round(2)
+        out["trades"] = out["trades"].fillna(0).astype(int)
+
+        total_pnl = float(out["realized_pnl"].dropna().sum()) if "realized_pnl" in out.columns else 0.0
+        total_capital = float(out["capital_invested"].dropna().sum()) if "capital_invested" in out.columns else 0.0
+        total_pct = round((total_pnl / total_capital) * 100.0, 2) if total_capital else 0.0
+
+        summary_row = {col: "" for col in out.columns}
+        if "date" in summary_row:
+            summary_row["date"] = "TOTAL"
+        elif "symbol" in summary_row:
+            summary_row["symbol"] = "TOTAL"
+        if "realized_pnl" in summary_row:
+            summary_row["realized_pnl"] = round(total_pnl, 2)
+        if "pnl_pct" in summary_row:
+            summary_row["pnl_pct"] = total_pct
+        if "capital_invested" in summary_row:
+            summary_row["capital_invested"] = round(total_capital, 2)
+        out = pd.concat([out, pd.DataFrame([summary_row])], ignore_index=True)
+
+        if "pnl_pct" in out.columns:
+            out["pnl_pct"] = out["pnl_pct"].apply(
+                lambda x: f"{float(x):.2f}%" if pd.notna(x) and x != "" else x
+            )
+        out = out.rename(
+            columns={
+                "date": "Date",
+                "symbol": "Symbol",
+                "trades": "Trades",
+                "capital_invested": "Capital Invested",
+                "realized_pnl": "Realized PnL",
+                "pnl_pct": "PnL %",
+            }
+        )
+        return out
 
     def _extract_funds_display(payload):
         data = (payload or {}).get("data", {})
@@ -267,6 +328,11 @@ def define_server(input, output, session):
             ui.tags.span(f"PnL %: {pct_f:.2f}%", class_=pct_cls),
             class_="oh-status-text",
         )
+
+    @output
+    @render.ui
+    def historical_orders_status():
+        return ui.tags.span(historical_orders_status_msg.get(), class_="oh-status-text")
 
     def _get_total_pnl():
         df = order_log.get()
@@ -476,6 +542,54 @@ def define_server(input, output, session):
             order_history_totals.set({"pnl": None, "pct": None, "rows": None})
             if update_status:
                 order_history_status_msg.set(f"[ERROR] Order history fetch failed: {err}")
+
+    def _summarize_current_order_history_for_save():
+        df = order_history_data.get()
+        if df is None or df.empty or "Message" in df.columns:
+            return pd.DataFrame()
+
+        src = df.copy()
+        if "side" in src.columns:
+            src = src[src["side"].astype(str).str.upper() != "TOTAL"].copy()
+        if src.empty:
+            return pd.DataFrame()
+
+        src["time_dt"] = pd.to_datetime(src.get("time"), errors="coerce")
+        src["date"] = src["time_dt"].dt.strftime("%Y-%m-%d")
+        src["symbol"] = src.get("symbol", "").astype(str)
+        src["side"] = src.get("side", "").astype(str).str.upper()
+        src["qty_num"] = pd.to_numeric(src.get("qty"), errors="coerce")
+        src["price_num"] = pd.to_numeric(src.get("price"), errors="coerce")
+        src["pnl_num"] = pd.to_numeric(src.get("PnL"), errors="coerce")
+        src = src[src["date"].notna() & src["symbol"].ne("")]
+        if src.empty:
+            return pd.DataFrame()
+
+        rows = []
+        for (d, s), g in src.groupby(["date", "symbol"], dropna=True):
+            buy_mask = g["side"] == "BUY"
+            capital = float((g.loc[buy_mask, "qty_num"] * g.loc[buy_mask, "price_num"]).dropna().sum())
+            realized_pnl = float(g["pnl_num"].dropna().sum())
+            pnl_pct = round((realized_pnl / capital) * 100.0, 2) if capital else 0.0
+            rows.append(
+                {
+                    "date": d,
+                    "symbol": s,
+                    "trades": int(len(g)),
+                    "capital_invested": round(capital, 2),
+                    "realized_pnl": round(realized_pnl, 2),
+                    "pnl_pct": pnl_pct,
+                    "saved_at": _dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def _refresh_historical_orders_view():
+        df = _load_historical_orders_df()
+        if df is None or df.empty:
+            historical_orders_data.set(pd.DataFrame({"Message": ["No historical orders saved"]}))
+            return
+        historical_orders_data.set(_build_historical_view(df))
 
     @output
     @render.ui
@@ -1458,9 +1572,37 @@ def define_server(input, output, session):
         return max(qty, 0)
 
     @reactive.effect
+    def _init_historical_orders():
+        _refresh_historical_orders_view()
+
+    @reactive.effect
     @reactive.event(input.refresh_order_history)
     def _refresh_order_history():
         _refresh_order_history_data(update_status=True, auto=False)
+
+    @reactive.effect
+    @reactive.event(input.save_order_history)
+    def _save_order_history_snapshot():
+        summary_df = _summarize_current_order_history_for_save()
+        if summary_df is None or summary_df.empty:
+            historical_orders_status_msg.set("[WARN] Nothing to save. Fetch order history first.")
+            return
+
+        existing = _load_historical_orders_df()
+        if existing is None or existing.empty:
+            merged = summary_df
+        else:
+            base = existing.copy()
+            base["date"] = base["date"].astype(str)
+            base["symbol"] = base["symbol"].astype(str)
+            keys_new = set(zip(summary_df["date"].astype(str), summary_df["symbol"].astype(str)))
+            keep_mask = ~base.apply(lambda r: (str(r.get("date", "")), str(r.get("symbol", ""))) in keys_new, axis=1)
+            merged = pd.concat([base[keep_mask], summary_df], ignore_index=True)
+
+        merged = merged.sort_values(["date", "symbol"]).reset_index(drop=True)
+        _save_historical_orders_df(merged)
+        _refresh_historical_orders_view()
+        historical_orders_status_msg.set(f"[OK] Historical data saved: {len(summary_df)} symbol rows")
 
     def _get_sandbox_token():
         ui_token = input.sandbox_token().strip()
@@ -2039,6 +2181,43 @@ def define_server(input, output, session):
             styles.append({
                 "cols": ["PnL %"],
                 "rows": pnlp_s.lt(0).fillna(False).tolist(),
+                "style": {"color": "#ff7c6a", "font-weight": "700"},
+            })
+
+        return render.DataTable(df, width="100%", height="calc(100vh - 320px)", styles=styles)
+
+    @output
+    @render.data_frame
+    def historical_orders_table():
+        from shiny import render
+        df = historical_orders_data.get()
+        if df is None or df.empty:
+            return render.DataTable(pd.DataFrame({"Message": ["No historical orders saved"]}))
+
+        styles = []
+        if "Realized PnL" in df.columns:
+            pnl_s = pd.to_numeric(df["Realized PnL"], errors="coerce")
+            styles.append({
+                "cols": ["Realized PnL"],
+                "rows": pnl_s.gt(0).fillna(False).tolist(),
+                "style": {"color": "#67d49b", "font-weight": "700"},
+            })
+            styles.append({
+                "cols": ["Realized PnL"],
+                "rows": pnl_s.lt(0).fillna(False).tolist(),
+                "style": {"color": "#ff7c6a", "font-weight": "700"},
+            })
+
+        if "PnL %" in df.columns:
+            pct_s = pd.to_numeric(df["PnL %"].astype(str).str.replace("%", "", regex=False), errors="coerce")
+            styles.append({
+                "cols": ["PnL %"],
+                "rows": pct_s.gt(0).fillna(False).tolist(),
+                "style": {"color": "#67d49b", "font-weight": "700"},
+            })
+            styles.append({
+                "cols": ["PnL %"],
+                "rows": pct_s.lt(0).fillna(False).tolist(),
                 "style": {"color": "#ff7c6a", "font-weight": "700"},
             })
 

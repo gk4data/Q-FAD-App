@@ -253,9 +253,14 @@ def create_main_ui():
                     ui.nav_panel(ui.HTML("<i class='bi bi-receipt'></i> Trades"), ui.div(ui.output_data_frame("trades_table"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-flask'></i> Live Trading"), ui.div(ui.output_text_verbatim("position_status"), ui.output_data_frame("orders_table"), style="padding:16px;")),
                     ui.nav_panel(
-                        ui.HTML("<i class='bi bi-clock-history'></i> Order History"),
+                        ui.HTML("<i class='bi bi-clock-history'></i> Daily Order Data"),
                         ui.div(
                             ui.div(
+                                ui.input_action_button(
+                                    "save_order_history",
+                                    ui.HTML("<i class='bi bi-save'></i> Save Data"),
+                                    class_="btn-success order-history-refresh-btn",
+                                ),
                                 ui.input_action_button(
                                     "refresh_order_history",
                                     ui.HTML("<i class='bi bi-arrow-repeat'></i> Fetch Today's Orders"),
@@ -265,6 +270,14 @@ def create_main_ui():
                             ),
                             ui.div(ui.output_ui("order_history_status"), class_="order-history-status"),
                             ui.div(ui.output_data_frame("order_history_table"), class_="order-history-table-wrap"),
+                            class_="order-history-panel"
+                        )
+                    ),
+                    ui.nav_panel(
+                        ui.HTML("<i class='bi bi-journal-text'></i> Historical Orders"),
+                        ui.div(
+                            ui.div(ui.output_ui("historical_orders_status"), class_="order-history-status"),
+                            ui.div(ui.output_data_frame("historical_orders_table"), class_="order-history-table-wrap"),
                             class_="order-history-panel"
                         )
                     ),
