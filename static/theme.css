@@ -271,6 +271,15 @@ input, select, textarea {
 .btn-success { background: var(--accent-green); color: #fff; }
 .btn-danger  { background: var(--accent-red); color: #fff; }
 .btn-warning { background: var(--accent-amber); color: #111; }
+.btn-info { background: #0ea5e9; color: #062033; border-color: #0ea5e9; }
+
+#load_instruments,
+#refresh_order_history,
+#fetch {
+  background: #3f5578 !important;
+  border-color: #3f5578 !important;
+  color: #ffffff !important;
+}
 
 /* Reduce size of the Fetch & Process button */
 #fetch {
@@ -454,4 +463,208 @@ table {
 .mini-sidebar-radios > label.control-label,
 #sidebar_mode-label {
   display: none !important;
+}
+
+/* Order History Tab */
+.order-history-panel {
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(20, 28, 39, 0.88), rgba(13, 19, 28, 0.88));
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+}
+
+.order-history-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.order-history-refresh-btn {
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 9px 14px;
+  box-shadow: none !important;
+}
+
+.order-history-status pre {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 12px 0;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid #35536f;
+  background: rgba(17, 40, 62, 0.45);
+  color: #cde9ff;
+  font-weight: 600;
+}
+
+.order-history-status .oh-status-text {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.order-history-status .oh-val-pos {
+  color: #67d49b;
+  font-weight: 800;
+}
+
+.order-history-status .oh-val-neg {
+  color: #ff7c6a;
+  font-weight: 800;
+}
+
+.order-history-status .oh-val-zero {
+  color: #e5e7eb;
+  font-weight: 800;
+}
+
+.order-history-table-wrap {
+  border: 1px solid rgba(120, 140, 170, 0.16) !important;
+  border-radius: 10px;
+  overflow: auto;
+  background: #151822;
+}
+
+.order-history-table-wrap .dataTables_wrapper,
+.order-history-table-wrap .dataTables_scroll,
+.order-history-table-wrap .dataTables_scrollHead,
+.order-history-table-wrap .dataTables_scrollBody,
+.order-history-table-wrap .table-responsive {
+  background: #151822 !important;
+  color: #cfd6e6 !important;
+  border: none !important;
+}
+
+.order-history-table-wrap .dataTables_scrollBody {
+  scrollbar-color: #2f3a4b #151822;
+  scrollbar-width: thin;
+}
+
+.order-history-table-wrap .dataTables_scrollHead {
+  overflow: hidden !important;
+  margin-bottom: 0 !important;
+}
+
+.order-history-table-wrap .dataTables_scrollHeadInner {
+  padding-right: 0 !important;
+}
+
+.order-history-table-wrap .dataTables_scrollHead::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+
+.order-history-table-wrap .dataTables_scrollBody::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.order-history-table-wrap .dataTables_scrollBody::-webkit-scrollbar-track {
+  background: #151822;
+}
+
+.order-history-table-wrap .dataTables_scrollBody::-webkit-scrollbar-thumb {
+  background: #2f3a4b;
+  border-radius: 8px;
+  border: 2px solid #151822;
+}
+
+.order-history-table-wrap table,
+.order-history-table-wrap table.dataTable,
+.order-history-table-wrap .table {
+  margin-bottom: 0;
+  border: none !important;
+  background: #151822 !important;
+  color: #cfd6e6 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.order-history-table-wrap table.dataTable.no-footer,
+.order-history-table-wrap table.dataTable,
+.order-history-table-wrap .dataTables_scrollHead table,
+.order-history-table-wrap .dataTables_scrollBody table {
+  border-bottom: none !important;
+  border-top: none !important;
+}
+
+.order-history-table-wrap thead th,
+.order-history-table-wrap table.dataTable thead th,
+.order-history-table-wrap .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #1b1f2a !important;
+  color: #9da7bd !important;
+  border-bottom: 1px solid rgba(120, 140, 170, 0.18) !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  letter-spacing: 0.15px;
+  text-transform: uppercase;
+  padding-top: 11px !important;
+  padding-bottom: 11px !important;
+}
+
+.order-history-table-wrap tbody td,
+.order-history-table-wrap table.dataTable tbody td,
+.order-history-table-wrap .table tbody td {
+  border-bottom: 1px solid rgba(120, 140, 170, 0.10) !important;
+  color: #d8deea;
+  background: transparent !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+  vertical-align: middle !important;
+}
+
+.order-history-table-wrap tbody tr:nth-child(odd),
+.order-history-table-wrap table.dataTable tbody tr:nth-child(odd),
+.order-history-table-wrap .table tbody tr:nth-child(odd) {
+  background: rgba(22, 25, 36, 0.96) !important;
+}
+
+.order-history-table-wrap tbody tr:nth-child(even),
+.order-history-table-wrap table.dataTable tbody tr:nth-child(even),
+.order-history-table-wrap .table tbody tr:nth-child(even) {
+  background: rgba(20, 23, 33, 0.96) !important;
+}
+
+.order-history-table-wrap tbody tr,
+.order-history-table-wrap table.dataTable tbody tr,
+.order-history-table-wrap .table tbody tr {
+  border: none !important;
+}
+
+.order-history-table-wrap tbody tr:hover,
+.order-history-table-wrap table.dataTable tbody tr:hover,
+.order-history-table-wrap .table tbody tr:hover {
+  background: rgba(35, 43, 60, 0.96) !important;
+}
+
+.order-history-table-wrap .dataTables_info,
+.order-history-table-wrap .dataTables_length label,
+.order-history-table-wrap .dataTables_filter label,
+.order-history-table-wrap .dataTables_paginate {
+  color: #9aa7bc !important;
+  font-size: 12px !important;
+}
+
+.order-history-table-wrap .dataTables_filter input,
+.order-history-table-wrap .dataTables_length select {
+  background: #101521 !important;
+  color: #d8e5f5 !important;
+  border: 1px solid #313a4b !important;
+}
+
+/* Align numeric columns right for broker-like scanability */
+.order-history-table-wrap tbody td:nth-child(4),
+.order-history-table-wrap thead th:nth-child(4),
+.order-history-table-wrap tbody td:nth-child(5),
+.order-history-table-wrap thead th:nth-child(5),
+.order-history-table-wrap tbody td:nth-child(12),
+.order-history-table-wrap tbody td:nth-child(13),
+.order-history-table-wrap thead th:nth-child(12),
+.order-history-table-wrap thead th:nth-child(13) {
+  text-align: right !important;
 }

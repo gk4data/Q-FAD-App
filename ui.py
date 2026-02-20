@@ -252,6 +252,22 @@ def create_main_ui():
                     ui.nav_panel(ui.HTML("<i class='bi bi-bar-chart'></i> Backtest"), ui.div(ui.output_ui("backtest_summary"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-receipt'></i> Trades"), ui.div(ui.output_data_frame("trades_table"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-flask'></i> Live Trading"), ui.div(ui.output_text_verbatim("position_status"), ui.output_data_frame("orders_table"), style="padding:16px;")),
+                    ui.nav_panel(
+                        ui.HTML("<i class='bi bi-clock-history'></i> Order History"),
+                        ui.div(
+                            ui.div(
+                                ui.input_action_button(
+                                    "refresh_order_history",
+                                    ui.HTML("<i class='bi bi-arrow-repeat'></i> Fetch Today's Orders"),
+                                    class_="btn-info order-history-refresh-btn",
+                                ),
+                                class_="order-history-actions",
+                            ),
+                            ui.div(ui.output_ui("order_history_status"), class_="order-history-status"),
+                            ui.div(ui.output_data_frame("order_history_table"), class_="order-history-table-wrap"),
+                            class_="order-history-panel"
+                        )
+                    ),
                 ),
                 class_="main-area"
             ),

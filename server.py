@@ -72,6 +72,9 @@ def define_server(input, output, session):
     websocket_chart_tick = reactive.Value(0)
     last_signal_key = reactive.Value(None)
     last_traded_ts = reactive.Value(None)
+    order_history_data = reactive.Value(pd.DataFrame())
+    order_history_status_msg = reactive.Value("[INFO] Click 'Fetch Today's Orders' to load history")
+    order_history_totals = reactive.Value({"pnl": None, "pct": None, "rows": None})
     order_log = reactive.Value(pd.DataFrame(columns=[
         "time", "action", "instrument", "qty", "price", "fill_price", "entry_price_ref", "pnl", "pnl_pct", "order_id", "status", "message"
     ]))
@@ -83,6 +86,11 @@ def define_server(input, output, session):
         "entry_fill_price": None,
         "qty": 0,
         "instrument": None,
+        "product": None,
+        "sl_pct": None,
+        "sl_placed": False,
+        "sl_attempts": 0,
+        "sl_next_retry_ts": None,
     })
     pending_exit = reactive.Value(None)
     last_realized_pnl = reactive.Value(None)
@@ -228,6 +236,38 @@ def define_server(input, output, session):
             return trade_status_msg.get()
         return f"{trade_status_msg.get()} | PnL: {pnl_total}"
 
+    @output
+    @render.ui
+    def order_history_status():
+        totals = order_history_totals.get() or {}
+        rows = totals.get("rows")
+        pnl = totals.get("pnl")
+        pct = totals.get("pct")
+
+        if rows is None or pnl is None:
+            return ui.tags.span(order_history_status_msg.get(), class_="oh-status-text")
+
+        try:
+            pnl_f = float(pnl)
+        except Exception:
+            pnl_f = 0.0
+        try:
+            pct_f = float(pct)
+        except Exception:
+            pct_f = 0.0
+
+        pnl_cls = "oh-val-pos" if pnl_f > 0 else ("oh-val-neg" if pnl_f < 0 else "oh-val-zero")
+        pct_cls = "oh-val-pos" if pct_f > 0 else ("oh-val-neg" if pct_f < 0 else "oh-val-zero")
+
+        return ui.tags.span(
+            ui.tags.span(f"[OK] Today's orders loaded: {int(rows)} rows", class_="oh-status-text"),
+            ui.tags.span(" | ", class_="oh-status-text"),
+            ui.tags.span(f"Total PnL: {pnl_f:.2f}", class_=pnl_cls),
+            ui.tags.span(" | ", class_="oh-status-text"),
+            ui.tags.span(f"PnL %: {pct_f:.2f}%", class_=pct_cls),
+            class_="oh-status-text",
+        )
+
     def _get_total_pnl():
         df = order_log.get()
         if df is None or df.empty or "pnl" not in df.columns:
@@ -239,6 +279,203 @@ def define_server(input, output, session):
             return round(float(pnl_series.sum()), 2)
         except Exception:
             return None
+
+    def _extract_rows(payload):
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            data = payload.get("data", [])
+            return data if isinstance(data, list) else []
+        return []
+
+    def _num(v):
+        try:
+            return float(v)
+        except Exception:
+            return np.nan
+
+    def _build_order_history(order_rows, trade_rows):
+        order_df = pd.DataFrame(order_rows) if order_rows else pd.DataFrame()
+        order_map = {}
+        if not order_df.empty and "order_id" in order_df.columns:
+            for _, r in order_df.iterrows():
+                oid = str(r.get("order_id", "")).strip()
+                if oid:
+                    order_map[oid] = r.to_dict()
+
+        # Upstox often returns trades newest-first; FIFO PnL requires oldest-first processing.
+        def _trade_ts(trade):
+            order_id = str(trade.get("order_id", "")).strip()
+            order_info = order_map.get(order_id, {})
+            raw = (
+                trade.get("trade_time")
+                or trade.get("exchange_timestamp")
+                or trade.get("order_timestamp")
+                or order_info.get("exchange_timestamp")
+                or order_info.get("order_timestamp")
+                or None
+            )
+            try:
+                return pd.to_datetime(raw, errors="coerce")
+            except Exception:
+                return pd.NaT
+
+        trade_with_ts = []
+        for i, t in enumerate(trade_rows or []):
+            ts_val = _trade_ts(t)
+            trade_with_ts.append((i, t, ts_val))
+
+        trade_rows_sorted = [
+            t for _, t, _ in sorted(
+                trade_with_ts,
+                key=lambda x: (pd.isna(x[2]), x[2], x[0])
+            )
+        ]
+
+        book = {}
+        out_rows = []
+        for t in trade_rows_sorted:
+            order_id = str(t.get("order_id", "")).strip()
+            order_info = order_map.get(order_id, {})
+
+            inst = t.get("instrument_token") or order_info.get("instrument_token") or ""
+            symbol = t.get("trading_symbol") or order_info.get("trading_symbol") or ""
+            side = str(t.get("transaction_type") or order_info.get("transaction_type") or "").upper()
+            qty = _num(t.get("quantity", t.get("traded_quantity", order_info.get("filled_quantity", 0))))
+            price = _num(t.get("trade_price", t.get("average_price", order_info.get("average_price", order_info.get("price")))))
+            ts = (
+                t.get("trade_time")
+                or t.get("exchange_timestamp")
+                or t.get("order_timestamp")
+                or order_info.get("exchange_timestamp")
+                or order_info.get("order_timestamp")
+                or ""
+            )
+
+            realized_pnl = np.nan
+            realized_pct = np.nan
+            matched_cost = np.nan
+            qty_val = 0.0 if np.isnan(qty) else float(qty)
+            price_val = np.nan if np.isnan(price) else float(price)
+
+            if inst not in book:
+                book[inst] = []
+
+            if side == "BUY" and qty_val > 0 and not np.isnan(price_val):
+                book[inst].append([qty_val, price_val])
+            elif side == "SELL" and qty_val > 0 and not np.isnan(price_val):
+                remain = qty_val
+                pnl_val = 0.0
+                cost_val = 0.0
+                lots = book[inst]
+                while remain > 0 and lots:
+                    lot_qty, lot_price = lots[0]
+                    m = min(remain, lot_qty)
+                    pnl_val += (price_val - lot_price) * m
+                    cost_val += lot_price * m
+                    remain -= m
+                    lot_qty -= m
+                    if lot_qty <= 0:
+                        lots.pop(0)
+                    else:
+                        lots[0][0] = lot_qty
+                if cost_val > 0:
+                    realized_pnl = round(pnl_val, 2)
+                    matched_cost = cost_val
+                    realized_pct = round((pnl_val / cost_val) * 100.0, 2)
+
+            out_rows.append({
+                "time": ts,
+                "symbol": symbol,
+                "side": side,
+                "qty": qty_val if qty_val else np.nan,
+                "price": price_val,
+                "order_id": order_id,
+                "order_type": order_info.get("order_type", ""),
+                "product": order_info.get("product", ""),
+                "status": order_info.get("status", ""),
+                "tag": order_info.get("tag", ""),
+                "message": order_info.get("status_message_raw", order_info.get("status_message", "")),
+                "PnL": realized_pnl,
+                "PnL %": realized_pct,
+                "_matched_cost": matched_cost,
+            })
+
+        out = pd.DataFrame(out_rows)
+        if out.empty:
+            return out, 0.0, np.nan
+
+        try:
+            parsed = pd.to_datetime(out["time"], errors="coerce")
+            today = _dt.now().date()
+            mask = parsed.dt.date == today
+            if mask.any():
+                out = out[mask].copy()
+                out["_time_sort"] = parsed[mask]
+                out = out.sort_values("_time_sort", ascending=True, na_position="last")
+                out["time"] = out["_time_sort"].dt.strftime("%Y-%m-%d %H:%M:%S")
+                out = out.drop(columns=["_time_sort"], errors="ignore")
+        except Exception:
+            pass
+
+        total_pnl = round(float(pd.to_numeric(out["PnL"], errors="coerce").dropna().sum()), 2)
+        total_cost = float(pd.to_numeric(out["_matched_cost"], errors="coerce").dropna().sum())
+        total_pct = round((total_pnl / total_cost) * 100.0, 2) if total_cost else np.nan
+
+        summary = {c: "" for c in out.columns}
+        summary["side"] = "TOTAL"
+        summary["PnL"] = total_pnl
+        summary["PnL %"] = total_pct
+        out = pd.concat([out, pd.DataFrame([summary])], ignore_index=True)
+
+        out["qty"] = out["qty"].apply(lambda x: round(float(x), 2) if pd.notna(x) and x != "" else x)
+        out["price"] = out["price"].apply(lambda x: round(float(x), 2) if pd.notna(x) and x != "" else x)
+        out["PnL"] = out["PnL"].apply(lambda x: round(float(x), 2) if pd.notna(x) and x != "" else x)
+        out["PnL %"] = out["PnL %"].apply(lambda x: round(float(x), 2) if pd.notna(x) and x != "" else x)
+        out["PnL %"] = out["PnL %"].apply(
+            lambda x: f"{float(x):.2f}%" if pd.notna(x) and x != "" else x
+        )
+        out = out.drop(columns=["_matched_cost"], errors="ignore")
+        return out, total_pnl, total_pct
+
+    def _refresh_order_history_data(update_status=False, auto=False):
+        access_token = token.get()
+        if not access_token:
+            if update_status:
+                order_history_status_msg.set("[ERROR] Authenticate first to fetch order history")
+            return
+        try:
+            order_payload = client.get_order_book(access_token)
+            trade_payload = client.get_trades_for_day(access_token)
+            order_rows = _extract_rows(order_payload)
+            trade_rows = _extract_rows(trade_payload)
+            history_df, total_pnl, total_pct = _build_order_history(order_rows, trade_rows)
+            if history_df is None or history_df.empty:
+                order_history_data.set(pd.DataFrame({"Message": ["No executed trades found for today"]}))
+                order_history_totals.set({"pnl": None, "pct": None, "rows": None})
+                if update_status:
+                    order_history_status_msg.set("[INFO] No executed trades found for today")
+                return
+            order_history_data.set(history_df)
+            order_history_totals.set(
+                {
+                    "pnl": total_pnl,
+                    "pct": (0.0 if pd.isna(total_pct) else total_pct),
+                    "rows": max(len(history_df) - 1, 0),
+                }
+            )
+            if update_status:
+                total_pct_text = f"{total_pct:.2f}%" if pd.notna(total_pct) else "--"
+                prefix = "[AUTO]" if auto else "[OK]"
+                order_history_status_msg.set(
+                    f"{prefix} Today's orders loaded: {max(len(history_df) - 1, 0)} rows | Total PnL: {total_pnl:.2f} | PnL %: {total_pct_text}"
+                )
+        except Exception as exc:
+            err = _extract_http_error_message(exc)
+            order_history_data.set(pd.DataFrame({"Message": [f"Fetch failed: {err}"]}))
+            order_history_totals.set({"pnl": None, "pct": None, "rows": None})
+            if update_status:
+                order_history_status_msg.set(f"[ERROR] Order history fetch failed: {err}")
 
     @output
     @render.ui
@@ -794,6 +1031,16 @@ def define_server(input, output, session):
             }
         ])
         order_log.set(pd.concat([df, entry], ignore_index=True))
+        # Keep Order History tab in sync with successful production order events.
+        try:
+            if (
+                live_trading_mode.get() == "live"
+                and str(status).lower() == "success"
+                and str(action).upper() in {"BUY", "SELL", "SL", "CANCEL", "EXIT_ALL"}
+            ):
+                _refresh_order_history_data(update_status=True, auto=True)
+        except Exception:
+            pass
 
     def _update_order_log(order_id, **updates):
         if not order_id:
@@ -820,6 +1067,85 @@ def define_server(input, output, session):
             return client, tkn, True
         tkn = _get_sandbox_token()
         return sandbox_client, tkn, False
+
+    def _extract_http_error_message(exc):
+        """Best-effort extraction of API error body from HTTP exceptions."""
+        try:
+            resp = getattr(exc, "response", None)
+            if resp is not None:
+                try:
+                    body = resp.json()
+                    if isinstance(body, dict):
+                        errors = body.get("errors")
+                        if isinstance(errors, list) and errors:
+                            msg = errors[0].get("message")
+                            if msg:
+                                return str(msg)
+                        msg = body.get("message")
+                        if msg:
+                            return str(msg)
+                    if body:
+                        return str(body)
+                except Exception:
+                    text = getattr(resp, "text", None)
+                    if text:
+                        return str(text)
+        except Exception:
+            pass
+        return str(exc)
+
+    def _place_order_safe(trade_client, token_val, payload):
+        try:
+            return trade_client.place_order(token_val, payload)
+        except Exception as exc:
+            err = _extract_http_error_message(exc)
+            return {"status": "error", "errors": [{"message": err}]}
+
+    def _cancel_order_safe(trade_client, token_val, order_id):
+        try:
+            return trade_client.cancel_order(token_val, order_id)
+        except Exception as exc:
+            return {"status": "error", "errors": [{"message": _extract_http_error_message(exc)}]}
+
+    def _exit_all_positions_safe(token_val, segment=None, tag=None):
+        try:
+            return client.exit_all_positions(token_val, segment=segment, tag=tag)
+        except Exception as exc:
+            return {"status": "error", "errors": [{"message": _extract_http_error_message(exc)}]}
+
+    def _round_to_tick(value, tick_size):
+        try:
+            v = float(value)
+            t = float(tick_size)
+            if t <= 0:
+                return round(v, 2)
+            return round(round(v / t) * t, 2)
+        except Exception:
+            return round(float(value), 2) if value is not None else None
+
+    def _build_sl_payload(inst, qty, product, sl_trigger, tick_size):
+        payload = {
+            "quantity": qty,
+            "product": product,
+            "validity": "DAY",
+            "tag": "qfad-sl",
+            "instrument_token": inst,
+            "order_type": "SL",
+            "transaction_type": "SELL",
+            "disclosed_quantity": 0,
+            "trigger_price": sl_trigger,
+            "is_amo": False,
+            "slice": False,
+        }
+        # For SELL SL (limit), keep limit just below trigger.
+        limit_price = _round_to_tick(max(float(sl_trigger) - float(tick_size), float(tick_size)), tick_size)
+        payload["price"] = limit_price
+        return payload
+
+    def _place_stop_loss_order(trade_client, token_val, inst, qty, product, sl_trigger, tick_size):
+        payload = _build_sl_payload(inst, qty, product, sl_trigger, tick_size)
+        resp = _place_order_safe(trade_client, token_val, payload)
+        return resp, "SL"
 
     def _fetch_order_fill(order_id, access_token):
         try:
@@ -909,16 +1235,16 @@ def define_server(input, output, session):
             capital = input.sandbox_capital()
             sl_pct = input.sandbox_sl_percent()
             product_type = input.sandbox_product_type()
+        state = position_state.get() or {}
         lot_size = instrument_manager.get_lot_size(inst)
         qty = _calculate_qty(price, capital, lot_size)
 
-        if qty <= 0:
+        if buy_signal and not state.get("open") and qty <= 0:
             trade_status_msg.set("[ERROR] Quantity calculated as 0; check capital/price/lot size")
             _append_order_log("SKIP", inst, qty, price, None, "error", "Quantity is 0")
             last_signal_key.set(signal_key)
             return
 
-        state = position_state.get() or {}
         if buy_signal and state.get("open"):
             _append_order_log("SKIP", inst, qty, price, None, "info", "Position already open")
             last_signal_key.set(signal_key)
@@ -945,7 +1271,7 @@ def define_server(input, output, session):
                     "is_amo": False,
                     "slice": False,
                 }
-                resp = trade_client.place_order(token_val, payload)
+                resp = _place_order_safe(trade_client, token_val, payload)
                 logger.info("Entry order response: %s", resp)
                 resp_status = resp.get("status", "")
                 entry_id = None
@@ -961,35 +1287,7 @@ def define_server(input, output, session):
                     trade_status_msg.set(f"[ERROR] Entry order failed: {error_msg}")
                     return
 
-                sl_trigger = round(price * (1 - (sl_pct / 100.0)), 2) if price else 0
-                sl_payload = {
-                    "quantity": qty,
-                    "product": product_type,
-                    "validity": "DAY",
-                    "price": 0,
-                    "tag": "qfad-sl",
-                    "instrument_token": inst,
-                    "order_type": "SL-M",
-                    "transaction_type": "SELL",
-                    "disclosed_quantity": 0,
-                    "trigger_price": sl_trigger,
-                    "is_amo": False,
-                    "slice": False,
-                }
-                sl_resp = trade_client.place_order(token_val, sl_payload)
-                logger.info("SL order response: %s", sl_resp)
-                sl_status = sl_resp.get("status", "")
                 sl_id = None
-                if sl_status == "success":
-                    sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
-                    sl_id = sl_order_ids[0] if sl_order_ids else None
-                    _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", f"Stop loss placed: {sl_id}")
-                else:
-                    error_msg = sl_resp.get("errors", [{}])[0].get("message", sl_resp.get("message", "Unknown error"))
-                    _append_order_log("SL", inst, qty, sl_trigger, None, "error", f"SL failed: {error_msg}")
-                    trade_status_msg.set(f"[ERROR] Stop loss order failed: {error_msg}")
-                    return
-
                 position_state.set({
                     "open": True,
                     "entry_order_id": entry_id,
@@ -998,73 +1296,125 @@ def define_server(input, output, session):
                     "entry_fill_price": None,
                     "qty": qty,
                     "instrument": inst,
+                    "product": product_type,
+                    "sl_pct": sl_pct,
+                    "sl_placed": False,
+                    "sl_attempts": 0,
+                    "sl_next_retry_ts": None,
                 })
                 last_realized_pnl.set(None)
                 mode_msg = "production" if is_production else "sandbox"
-                trade_status_msg.set(f"[OK] Entry + SL placed ({mode_msg})")
+                if is_production:
+                    trade_status_msg.set(f"[OK] Entry placed ({mode_msg}); waiting for fill to place SL")
+                else:
+                    tick_size = instrument_manager.get_tick_size(inst, default=0.05)
+                    sl_trigger = _round_to_tick(price * (1 - (sl_pct / 100.0)), tick_size) if price else 0
+                    sl_resp, sl_type = _place_stop_loss_order(
+                        trade_client, token_val, inst, qty, product_type, sl_trigger, tick_size
+                    )
+                    logger.info("SL order response: %s", sl_resp)
+                    sl_status = sl_resp.get("status", "")
+                    if sl_status == "success":
+                        sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
+                        sl_id = sl_order_ids[0] if sl_order_ids else None
+                        _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", f"Stop loss placed ({sl_type}): {sl_id}")
+                        position_state.set({
+                            **position_state.get(),
+                            "sl_order_id": sl_id,
+                            "sl_placed": True,
+                            "sl_attempts": 0,
+                            "sl_next_retry_ts": None,
+                        })
+                        trade_status_msg.set(f"[OK] Entry + SL placed ({mode_msg})")
+                    else:
+                        error_msg = sl_resp.get("errors", [{}])[0].get("message", sl_resp.get("message", "Unknown error"))
+                        _append_order_log("SL", inst, qty, sl_trigger, None, "error", f"SL ({sl_type}) failed: {error_msg}")
+                        trade_status_msg.set(f"[ERROR] Stop loss order failed: {error_msg}")
                 _refresh_funds()
 
             if sell_signal:
+                state = position_state.get() or {}
                 sl_id = state.get("sl_order_id")
                 if sl_id:
                     try:
-                        trade_client.cancel_order(token_val, sl_id)
+                        cancel_resp = _cancel_order_safe(trade_client, token_val, sl_id)
+                        if cancel_resp.get("status") != "success":
+                            raise RuntimeError(cancel_resp.get("errors", [{}])[0].get("message", "Cancel failed"))
                         _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "success", "SL canceled")
                     except Exception as cancel_exc:
                         _append_order_log("CANCEL", inst, state.get("qty"), price, sl_id, "error", str(cancel_exc))
 
-                exit_payload = {
-                    "quantity": state.get("qty"),
-                    "product": product_type,
-                    "validity": "DAY",
-                    "price": 0,
-                    "tag": "qfad-exit",
-                    "instrument_token": inst,
-                    "order_type": "MARKET",
-                    "transaction_type": "SELL",
-                    "disclosed_quantity": 0,
-                    "trigger_price": 0,
-                    "is_amo": False,
-                    "slice": False,
-                }
-                exit_resp = trade_client.place_order(token_val, exit_payload)
-                logger.info("Exit order response: %s", exit_resp)
-                exit_status = exit_resp.get("status", "")
                 exit_id = None
-                if exit_status == "success":
-                    exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
-                    exit_id = exit_order_ids[0] if exit_order_ids else None
-                    _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", f"Exit placed: {exit_id}")
-                    entry_fill = state.get("entry_fill_price") or state.get("entry_price")
-                    est_pnl = None
+                exit_ok = False
+                if is_production:
+                    segment = ""
                     try:
-                        if entry_fill is not None and state.get("qty"):
-                            est_pnl = round((float(price) - float(entry_fill)) * float(state.get("qty")), 2)
+                        segment = str(inst).split("|", 1)[0]
                     except Exception:
-                        est_pnl = None
-                    est_pnl_pct = None
-                    try:
-                        if entry_fill is not None and float(entry_fill) != 0:
-                            est_pnl_pct = round(((float(price) - float(entry_fill)) / float(entry_fill)) * 100.0, 2)
-                    except Exception:
-                        est_pnl_pct = None
-                    if exit_id:
-                        _update_order_log(
-                            exit_id,
-                            fill_price=price,
-                            entry_price_ref=entry_fill,
-                            pnl=est_pnl,
-                            pnl_pct=est_pnl_pct,
-                            message=f"Exit placed @ {price}",
-                        )
-                    last_realized_pnl.set(est_pnl)
-                else:
-                    error_msg = exit_resp.get("errors", [{}])[0].get("message", exit_resp.get("message", "Unknown error"))
-                    _append_order_log("SELL", inst, state.get("qty"), price, None, "error", f"Exit failed: {error_msg}")
-                    trade_status_msg.set(f"[ERROR] Exit order failed: {error_msg}")
-                    return
+                        segment = ""
+                    exit_all_resp = _exit_all_positions_safe(token_val, segment=segment or None, tag="qfad-entry")
+                    logger.info("Exit all positions response: %s", exit_all_resp)
+                    if exit_all_resp.get("status") in {"success", "partial_success"}:
+                        exit_ids = exit_all_resp.get("data", {}).get("order_ids", []) if isinstance(exit_all_resp.get("data"), dict) else []
+                        exit_id = exit_ids[0] if exit_ids else None
+                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, exit_id, "success", f"Exit-all placed: {exit_id}")
+                        exit_ok = True
+                    else:
+                        error_msg = exit_all_resp.get("errors", [{}])[0].get("message", exit_all_resp.get("message", "Unknown error"))
+                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, None, "error", f"Exit-all failed: {error_msg}")
+
+                if not exit_ok:
+                    exit_payload = {
+                        "quantity": state.get("qty"),
+                        "product": state.get("product") or product_type,
+                        "validity": "DAY",
+                        "price": 0,
+                        "tag": "qfad-exit",
+                        "instrument_token": inst,
+                        "order_type": "MARKET",
+                        "transaction_type": "SELL",
+                        "disclosed_quantity": 0,
+                        "trigger_price": 0,
+                        "is_amo": False,
+                        "slice": False,
+                    }
+                    exit_resp = _place_order_safe(trade_client, token_val, exit_payload)
+                    logger.info("Exit order response: %s", exit_resp)
+                    exit_status = exit_resp.get("status", "")
+                    if exit_status == "success":
+                        exit_order_ids = exit_resp.get("data", {}).get("order_ids", [])
+                        exit_id = exit_order_ids[0] if exit_order_ids else None
+                        _append_order_log("SELL", inst, state.get("qty"), price, exit_id, "success", f"Exit placed: {exit_id}")
+                        exit_ok = True
+                    else:
+                        error_msg = exit_resp.get("errors", [{}])[0].get("message", exit_resp.get("message", "Unknown error"))
+                        _append_order_log("SELL", inst, state.get("qty"), price, None, "error", f"Exit failed: {error_msg}")
+                        trade_status_msg.set(f"[ERROR] Exit order failed: {error_msg}")
+                        return
 
                 entry_fill = state.get("entry_fill_price") or state.get("entry_price")
+                est_pnl = None
+                try:
+                    if entry_fill is not None and state.get("qty"):
+                        est_pnl = round((float(price) - float(entry_fill)) * float(state.get("qty")), 2)
+                except Exception:
+                    est_pnl = None
+                est_pnl_pct = None
+                try:
+                    if entry_fill is not None and float(entry_fill) != 0:
+                        est_pnl_pct = round(((float(price) - float(entry_fill)) / float(entry_fill)) * 100.0, 2)
+                except Exception:
+                    est_pnl_pct = None
+                if exit_id:
+                    _update_order_log(
+                        exit_id,
+                        fill_price=price,
+                        entry_price_ref=entry_fill,
+                        pnl=est_pnl,
+                        pnl_pct=est_pnl_pct,
+                        message=f"Exit placed @ {price}",
+                    )
+                last_realized_pnl.set(est_pnl)
                 if exit_id:
                     pending_exit.set({
                         "exit_order_id": exit_id,
@@ -1082,6 +1432,11 @@ def define_server(input, output, session):
                     "entry_fill_price": None,
                     "qty": 0,
                     "instrument": None,
+                    "product": None,
+                    "sl_pct": None,
+                    "sl_placed": False,
+                    "sl_attempts": 0,
+                    "sl_next_retry_ts": None,
                 })
                 mode_msg = "production" if is_production else "sandbox"
                 trade_status_msg.set(f"[OK] Exit placed ({mode_msg})")
@@ -1090,8 +1445,9 @@ def define_server(input, output, session):
             last_signal_key.set(signal_key)
 
         except Exception as exc:
-            trade_status_msg.set(f"[ERROR] Trading error: {exc}")
-            _append_order_log("ERROR", inst, qty, price, None, "error", str(exc))
+            err = _extract_http_error_message(exc)
+            trade_status_msg.set(f"[ERROR] Trading error: {err}")
+            _append_order_log("ERROR", inst, qty, price, None, "error", err)
 
     def _calculate_qty(price, capital, lot_size):
         if price is None or price <= 0:
@@ -1100,6 +1456,11 @@ def define_server(input, output, session):
         if lot_size and lot_size > 1:
             qty = (qty // lot_size) * lot_size
         return max(qty, 0)
+
+    @reactive.effect
+    @reactive.event(input.refresh_order_history)
+    def _refresh_order_history():
+        _refresh_order_history_data(update_status=True, auto=False)
 
     def _get_sandbox_token():
         ui_token = input.sandbox_token().strip()
@@ -1172,6 +1533,46 @@ def define_server(input, output, session):
                     "entry_price": avg_price,
                 })
                 _update_order_log(entry_id, fill_price=avg_price, message=f"Entry filled @ {avg_price}")
+                state = position_state.get() or {}
+
+        # In production, place SL only after entry fill is confirmed.
+        retry_after = state.get("sl_next_retry_ts") or 0
+        now_ts = _dt.now().timestamp()
+        if state.get("open") and not state.get("sl_placed") and state.get("entry_fill_price") and now_ts >= float(retry_after):
+            inst = state.get("instrument")
+            qty = state.get("qty") or 0
+            product = state.get("product") or input.live_product_type()
+            sl_pct = state.get("sl_pct") or input.live_sl_percent()
+            entry_fill = state.get("entry_fill_price")
+            tick_size = instrument_manager.get_tick_size(inst, default=0.05)
+            sl_trigger = _round_to_tick(float(entry_fill) * (1 - (float(sl_pct) / 100.0)), tick_size)
+            sl_resp, sl_type = _place_stop_loss_order(
+                client, access_token, inst, qty, product, sl_trigger, tick_size
+            )
+            logger.info("Deferred SL order response: %s", sl_resp)
+            if sl_resp.get("status") == "success":
+                sl_ids = sl_resp.get("data", {}).get("order_ids", [])
+                sl_id = sl_ids[0] if sl_ids else None
+                _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", f"Stop loss placed ({sl_type}): {sl_id}")
+                position_state.set({
+                    **state,
+                    "sl_order_id": sl_id,
+                    "sl_placed": True,
+                    "sl_attempts": 0,
+                    "sl_next_retry_ts": None,
+                })
+                trade_status_msg.set("[OK] Entry filled and SL placed")
+            else:
+                error_msg = sl_resp.get("errors", [{}])[0].get("message", sl_resp.get("message", "Unknown error"))
+                attempts = int(state.get("sl_attempts") or 0) + 1
+                next_retry = _dt.now().timestamp() + 30
+                _append_order_log("SL", inst, qty, sl_trigger, None, "error", f"SL ({sl_type}) failed: {error_msg}")
+                position_state.set({
+                    **state,
+                    "sl_attempts": attempts,
+                    "sl_next_retry_ts": next_retry,
+                })
+                trade_status_msg.set(f"[ERROR] Stop loss order failed ({sl_type}): {error_msg}. Retrying in 30s")
 
         pending = pending_exit.get()
         if pending and pending.get("exit_order_id"):
@@ -1593,6 +1994,55 @@ def define_server(input, output, session):
         if "pnl_pct" in out.columns:
             out.rename(columns={"pnl_pct": "PnL %"}, inplace=True)
         return render.DataTable(out, width="100%", height="calc(100vh - 260px)")
+
+    @output
+    @render.data_frame
+    def order_history_table():
+        from shiny import render
+        df = order_history_data.get()
+        if df is None or df.empty:
+            return render.DataTable(pd.DataFrame({"Message": ["No order history loaded"]}))
+        styles = []
+        if "side" in df.columns:
+            side_s = df["side"].astype(str).str.upper()
+            styles.append({
+                "cols": ["side"],
+                "rows": side_s.eq("BUY").tolist(),
+                "style": {"color": "#67d49b", "font-weight": "700"},
+            })
+            styles.append({
+                "cols": ["side"],
+                "rows": side_s.eq("SELL").tolist(),
+                "style": {"color": "#ff7c6a", "font-weight": "700"},
+            })
+
+        if "PnL" in df.columns:
+            pnl_s = pd.to_numeric(df["PnL"], errors="coerce")
+            styles.append({
+                "cols": ["PnL"],
+                "rows": pnl_s.gt(0).fillna(False).tolist(),
+                "style": {"color": "#67d49b", "font-weight": "700"},
+            })
+            styles.append({
+                "cols": ["PnL"],
+                "rows": pnl_s.lt(0).fillna(False).tolist(),
+                "style": {"color": "#ff7c6a", "font-weight": "700"},
+            })
+
+        if "PnL %" in df.columns:
+            pnlp_s = pd.to_numeric(df["PnL %"].astype(str).str.replace("%", "", regex=False), errors="coerce")
+            styles.append({
+                "cols": ["PnL %"],
+                "rows": pnlp_s.gt(0).fillna(False).tolist(),
+                "style": {"color": "#67d49b", "font-weight": "700"},
+            })
+            styles.append({
+                "cols": ["PnL %"],
+                "rows": pnlp_s.lt(0).fillna(False).tolist(),
+                "style": {"color": "#ff7c6a", "font-weight": "700"},
+            })
+
+        return render.DataTable(df, width="100%", height="calc(100vh - 320px)", styles=styles)
 
     # ===== Download Handler =====
     @render.download(filename="signals_export.csv")

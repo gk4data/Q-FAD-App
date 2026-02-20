@@ -25,7 +25,7 @@ class InstrumentManager:
     }
     CACHE_FILE_TEMPLATE = "instruments_cache_{exchange}.pkl"
     CACHE_DURATION_DAYS = 30
-    REQUIRED_COLUMNS = ['name', 'instrument_type', 'expiry', 'instrument_key', 'strike_price', 'lot_size']
+    REQUIRED_COLUMNS = ['name', 'instrument_type', 'expiry', 'instrument_key', 'strike_price', 'lot_size', 'tick_size']
     
     def __init__(self):
         self.df = None
@@ -579,6 +579,31 @@ class InstrumentManager:
             return lot_size_int if lot_size_int > 0 else 1
         except Exception:
             return 1
+
+    def get_tick_size(self, instrument_key: str, default: float = 0.05) -> float:
+        """Return tick size for an instrument key; defaults when unavailable."""
+        df = None
+        if self.focus_df is not None and not self.focus_df.empty:
+            df = self.focus_df
+        elif self.fno_df is not None and not self.fno_df.empty:
+            df = self.fno_df
+        elif self.df is not None and not self.df.empty:
+            df = self.df
+
+        if df is None or df.empty or 'tick_size' not in df.columns:
+            return float(default)
+
+        try:
+            row = df[df['instrument_key'] == instrument_key].head(1)
+            if row.empty:
+                return float(default)
+            tick = row['tick_size'].iloc[0]
+            if tick is None or pd.isna(tick):
+                return float(default)
+            tick_f = float(tick)
+            return tick_f if tick_f > 0 else float(default)
+        except Exception:
+            return float(default)
     
     def get_cache_info(self) -> dict:
         """Get cache info"""

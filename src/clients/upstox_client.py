@@ -103,3 +103,42 @@ class UpstoxClient:
         r = requests.get(url, headers=headers, params={"order_id": order_id}, timeout=30)
         r.raise_for_status()
         return r.json()
+
+    def get_order_book(self, access_token: str):
+        """Fetch all orders (order book) for the day."""
+        url = f"{self.base_url}/order/retrieve-all"
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def get_trades_for_day(self, access_token: str):
+        """Fetch all executed trades for the day."""
+        url = f"{self.base_url}/order/trades/get-trades-for-day"
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def exit_all_positions(self, access_token: str, segment: str | None = None, tag: str | None = None):
+        """Exit all open positions, optionally filtered by segment and/or tag."""
+        url = f"{self.base_url}/order/positions/exit"
+        headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        params = {}
+        if segment:
+            params["segment"] = segment
+        if tag:
+            params["tag"] = tag
+        r = requests.post(url, headers=headers, params=params or None, timeout=30)
+        r.raise_for_status()
+        return r.json()
