@@ -73,7 +73,7 @@ def define_server(input, output, session):
     last_signal_key = reactive.Value(None)
     last_traded_ts = reactive.Value(None)
     order_log = reactive.Value(pd.DataFrame(columns=[
-        "time", "action", "instrument", "qty", "price", "fill_price", "pnl", "order_id", "status", "message"
+        "time", "action", "instrument", "qty", "price", "fill_price", "entry_price_ref", "pnl", "pnl_pct", "order_id", "status", "message"
     ]))
     position_state = reactive.Value({
         "open": False,
@@ -785,7 +785,9 @@ def define_server(input, output, session):
                 "qty": qty,
                 "price": price,
                 "fill_price": None,
+                "entry_price_ref": None,
                 "pnl": None,
+                "pnl_pct": None,
                 "order_id": order_id,
                 "status": status,
                 "message": message,
@@ -1040,8 +1042,21 @@ def define_server(input, output, session):
                             est_pnl = round((float(price) - float(entry_fill)) * float(state.get("qty")), 2)
                     except Exception:
                         est_pnl = None
+                    est_pnl_pct = None
+                    try:
+                        if entry_fill is not None and float(entry_fill) != 0:
+                            est_pnl_pct = round(((float(price) - float(entry_fill)) / float(entry_fill)) * 100.0, 2)
+                    except Exception:
+                        est_pnl_pct = None
                     if exit_id:
-                        _update_order_log(exit_id, fill_price=price, pnl=est_pnl, message=f"Exit placed @ {price}")
+                        _update_order_log(
+                            exit_id,
+                            fill_price=price,
+                            entry_price_ref=entry_fill,
+                            pnl=est_pnl,
+                            pnl_pct=est_pnl_pct,
+                            message=f"Exit placed @ {price}",
+                        )
                     last_realized_pnl.set(est_pnl)
                 else:
                     error_msg = exit_resp.get("errors", [{}])[0].get("message", exit_resp.get("message", "Unknown error"))
@@ -1171,7 +1186,20 @@ def define_server(input, output, session):
                         pnl = round((avg_price - float(entry_fill)) * float(qty), 2)
                 except Exception:
                     pnl = None
-                _update_order_log(exit_id, fill_price=avg_price, pnl=pnl, message=f"Exit filled @ {avg_price}")
+                pnl_pct = None
+                try:
+                    if entry_fill is not None and float(entry_fill) != 0:
+                        pnl_pct = round(((float(avg_price) - float(entry_fill)) / float(entry_fill)) * 100.0, 2)
+                except Exception:
+                    pnl_pct = None
+                _update_order_log(
+                    exit_id,
+                    fill_price=avg_price,
+                    entry_price_ref=entry_fill,
+                    pnl=pnl,
+                    pnl_pct=pnl_pct,
+                    message=f"Exit filled @ {avg_price}",
+                )
                 last_realized_pnl.set(pnl)
                 pending_exit.set(None)
 
@@ -1529,7 +1557,42 @@ def define_server(input, output, session):
             return render.DataTable(pd.DataFrame({"Message": ["No orders placed"]}))
 
         out = df.copy()
-        return render.DataTable(out, width="100%", height="400px")
+        out["qty"] = pd.to_numeric(out.get("qty"), errors="coerce")
+        out["pnl"] = pd.to_numeric(out.get("pnl"), errors="coerce")
+        out["entry_price_ref"] = pd.to_numeric(out.get("entry_price_ref"), errors="coerce")
+        out["pnl_pct"] = pd.to_numeric(out.get("pnl_pct"), errors="coerce")
+
+        # Backfill pnl% when possible from pnl / (entry_price_ref * qty)
+        can_derive_pct = (
+            out["pnl_pct"].isna()
+            & out["pnl"].notna()
+            & out["entry_price_ref"].notna()
+            & out["qty"].notna()
+            & ((out["entry_price_ref"] * out["qty"]) != 0)
+        )
+        out.loc[can_derive_pct, "pnl_pct"] = (
+            out.loc[can_derive_pct, "pnl"] / (out.loc[can_derive_pct, "entry_price_ref"] * out.loc[can_derive_pct, "qty"])
+        ) * 100.0
+
+        total_pnl = round(float(out["pnl"].dropna().sum()), 2) if out["pnl"].notna().any() else 0.0
+        notional = out["entry_price_ref"] * out["qty"]
+        total_notional = float(notional.where(out["pnl"].notna(), np.nan).dropna().sum()) if notional.notna().any() else 0.0
+        total_pnl_pct = round((total_pnl / total_notional) * 100.0, 2) if total_notional else np.nan
+
+        summary_row = {col: "" for col in out.columns}
+        summary_row["action"] = "TOTAL"
+        summary_row["pnl"] = total_pnl
+        summary_row["pnl_pct"] = total_pnl_pct
+        out = pd.concat([out, pd.DataFrame([summary_row])], ignore_index=True)
+
+        if "pnl" in out.columns:
+            out["pnl"] = out["pnl"].apply(lambda x: round(float(x), 2) if pd.notna(x) and x != "" else x)
+        if "pnl_pct" in out.columns:
+            out["pnl_pct"] = out["pnl_pct"].apply(lambda x: round(float(x), 2) if pd.notna(x) and x != "" else x)
+
+        if "pnl_pct" in out.columns:
+            out.rename(columns={"pnl_pct": "PnL %"}, inplace=True)
+        return render.DataTable(out, width="100%", height="calc(100vh - 260px)")
 
     # ===== Download Handler =====
     @render.download(filename="signals_export.csv")
