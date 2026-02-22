@@ -27,8 +27,8 @@ def plot_signals(df):
     fig = make_subplots(
         rows=5, cols=1, 
         shared_xaxes=True, 
-        row_heights=[0.5, 0.15, 0.2, 0.2, 0.2],
-        vertical_spacing=0.05, 
+        row_heights=[0.45, 0.12, 0.15, 0.14, 0.14],
+        vertical_spacing=0.08, 
         subplot_titles=("Candlesticks", "Volume", "Adaptive RSI & MFI", "Strength", "Stochastic & BBMAngle")
     )
 
@@ -306,35 +306,35 @@ def plot_signals(df):
 
     # ===== Layout - Professional Light-Gray Theme =====
     fig.update_layout(
-        title=dict(
-            text="<b>Q-FAD Algo HFT Trading</b>",
-            font=dict(size=20, color="#1a1a1a", family="Arial Black"),
-            x=0.5,
-            xanchor="center"
-        ),
-        xaxis_title="Date & Time",
+        title=None,
+        xaxis_title="",
         yaxis_title="Price",
         showlegend=True,
         legend=dict(
-            orientation="v",
-            yanchor="top",
-            y=0.99,
-            xanchor="right",
-            x=0.99,
-            font=dict(size=10, color="#1a1a1a"),
-            bgcolor="rgba(240, 240, 245, 0.9)",
+            orientation="h",
+            yanchor="middle",
+            y=0.66,
+            xanchor="left",
+            x=0.0,
+            font=dict(size=10, color="#1a1a1a", family="Inter, Segoe UI, sans-serif"),
+            bgcolor="rgba(240, 240, 245, 0.95)",
             bordercolor="#ccccdd",
             borderwidth=1,
-            tracegroupgap=5
+            tracegroupgap=8
         ),
         xaxis_rangeslider_visible=False,
-        height=1600,
-        width=1800,
+        height=1400,
+        autosize=True,
         hovermode='closest',
-        margin=dict(l=50, r=50, t=80, b=50),
+        margin=dict(l=40, r=40, t=60, b=50),
         plot_bgcolor="#f5f5f9",
         paper_bgcolor="#e8e8f0",
-        font=dict(color="#1a1a1a", family="Arial", size=11),
+        font=dict(color="#1a1a1a", family="Inter, Segoe UI, sans-serif", size=11),
+    )
+
+    # Make subplot titles cleaner and more readable
+    fig.update_annotations(
+        font=dict(size=14, color="#111827", family="Inter, Segoe UI Semibold, sans-serif")
     )
 
     # Update axes styling
@@ -348,8 +348,8 @@ def plot_signals(df):
         linewidth=1,
         linecolor="#a0a0b8",
         zeroline=False,
-        tickfont=dict(color="#4a4a5e", size=10),
-        title_font=dict(color="#1a1a1a", size=12)
+        tickfont=dict(color="#4a4a5e", size=10, family="Inter, Segoe UI, sans-serif"),
+        title_font=dict(color="#1a1a1a", size=12, family="Inter, Segoe UI Semibold, sans-serif")
     )
 
     fig.update_yaxes(
@@ -360,8 +360,8 @@ def plot_signals(df):
         linewidth=1,
         linecolor="#a0a0b8",
         zeroline=False,
-        tickfont=dict(color="#4a4a5e", size=10),
-        title_font=dict(color="#1a1a1a", size=12)
+        tickfont=dict(color="#4a4a5e", size=10, family="Inter, Segoe UI, sans-serif"),
+        title_font=dict(color="#1a1a1a", size=12, family="Inter, Segoe UI Semibold, sans-serif")
     )
 
     # Leave hover formatting to Plotly defaults so the hover shows date and time exactly as provided by the data

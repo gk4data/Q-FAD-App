@@ -3,7 +3,7 @@ import numpy as np
 import math
 
 
-def calculate_manual_pnl(df, initial_cash=100000.0, commission=0.0, fractional_shares=True):
+def calculate_manual_pnl(df, initial_cash=100000.0, commission=0.0, fractional_shares=True, stop_loss_pct=0.15):
     """
     Manual trade matching logic (same as fixed version before).
     """
@@ -38,6 +38,11 @@ def calculate_manual_pnl(df, initial_cash=100000.0, commission=0.0, fractional_s
         )
         sell_signal = bool(row.get('Sell_Signal', False))
 
+        stop_loss_hit = False
+        if position is not None:
+            stop_loss_price = position['entry_price'] * (1 - stop_loss_pct)
+            stop_loss_hit = close <= stop_loss_price
+
         if buy_signal and position is None:
             available_for_buy = current_cash - commission
             if available_for_buy <= 0:
@@ -59,8 +64,8 @@ def calculate_manual_pnl(df, initial_cash=100000.0, commission=0.0, fractional_s
             }
             current_cash = remaining_cash
 
-        if sell_signal and position is not None:
-            exit_price = close
+        if (sell_signal or stop_loss_hit) and position is not None:
+            exit_price = stop_loss_price if stop_loss_hit else close
             entry_price = position['entry_price']
             shares = position['shares']
             entry_cash_used = position['entry_cash_used']
