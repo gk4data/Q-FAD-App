@@ -1,10 +1,11 @@
 # server.py - Server logic for Q-FAD Trading App
 import os
+import math
 import logging
 import traceback
 import pandas as pd
 import numpy as np
-from datetime import date as _date, datetime as _dt
+from datetime import date as _date, datetime as _dt, timedelta
 
 from shiny import render, reactive, ui
 from shinywidgets import render_plotly
@@ -77,6 +78,8 @@ def define_server(input, output, session):
     order_history_totals = reactive.Value({"pnl": None, "pct": None, "rows": None})
     historical_orders_data = reactive.Value(pd.DataFrame())
     historical_orders_status_msg = reactive.Value("[INFO] Historical data will appear after saving Order History")
+    historical_bt_data = reactive.Value(pd.DataFrame())
+    historical_bt_status_msg = reactive.Value("[INFO] Select date range and run historical backtest")
     order_log = reactive.Value(pd.DataFrame(columns=[
         "time", "action", "instrument", "qty", "price", "fill_price", "entry_price_ref", "pnl", "pnl_pct", "order_id", "status", "message"
     ]))
@@ -118,6 +121,101 @@ def define_server(input, output, session):
         if d is None:
             return None
         return str(d).strip()
+
+    def _next_tuesday_for(d: _date) -> _date:
+        days_until_tuesday = (1 - d.weekday()) % 7
+        return d + timedelta(days=days_until_tuesday)
+
+    def _next_available_expiry_for_day(trade_day: _date, expiry_list: list[_date]) -> str | None:
+        """Pick the nearest available expiry on/after trade day from instrument master."""
+        if not expiry_list:
+            return None
+        for ex in expiry_list:
+            if ex >= trade_day:
+                return ex.strftime("%Y-%m-%d")
+        return None
+
+    def _resolve_option_base_key(symbol: str, strike: int, instrument_type: str) -> str | None:
+        """Resolve a base option key by symbol/strike/type without relying on specific expiry."""
+        df = None
+        if instrument_manager.focus_df is not None and not instrument_manager.focus_df.empty:
+            df = instrument_manager.focus_df
+        elif instrument_manager.fno_df is not None and not instrument_manager.fno_df.empty:
+            df = instrument_manager.fno_df
+        if df is None or df.empty:
+            return None
+        try:
+            rows = df[
+                (df["name"].astype(str).str.upper() == str(symbol).upper())
+                & (df["instrument_type"].astype(str).str.upper() == str(instrument_type).upper())
+                & (pd.to_numeric(df["strike_price"], errors="coerce") == float(strike))
+            ]
+            if rows.empty:
+                return None
+            return str(rows.iloc[0]["instrument_key"])
+        except Exception:
+            return None
+
+    def _resolve_nifty_index_key() -> str:
+        """Resolve canonical NIFTY 50 index instrument key from instrument master."""
+        canonical = "NSE_INDEX|Nifty 50"
+
+        # Fast-path: this is the valid canonical key in Upstox v2.
+        try:
+            if instrument_manager.df is not None and not instrument_manager.df.empty:
+                keys = instrument_manager.df.get("instrument_key")
+                if keys is not None and not keys.empty:
+                    key_set = set(keys.dropna().astype(str))
+                    if canonical in key_set:
+                        return canonical
+        except Exception:
+            pass
+
+        # Heuristic fallback from available rows.
+        try:
+            df_all = instrument_manager.df
+            if df_all is not None and not df_all.empty and "instrument_key" in df_all.columns:
+                work = df_all.copy()
+                work["instrument_key"] = work["instrument_key"].astype(str)
+                if "name" in work.columns:
+                    work["name"] = work["name"].astype(str)
+                else:
+                    work["name"] = ""
+
+                idx_rows = work[work["instrument_key"].str.startswith("NSE_INDEX|", na=False)]
+                if not idx_rows.empty:
+                    exact_name = idx_rows[idx_rows["name"].str.strip().str.lower() == "nifty 50"]
+                    if not exact_name.empty:
+                        return str(exact_name.iloc[0]["instrument_key"])
+
+                    key_like = idx_rows[idx_rows["instrument_key"].str.contains("Nifty 50", case=False, na=False)]
+                    if not key_like.empty:
+                        return str(key_like.iloc[0]["instrument_key"])
+        except Exception:
+            pass
+
+        return canonical
+
+    def _fetch_nifty_open_for_date(access_token: str, date_iso: str) -> float | None:
+        """Fetch NIFTY open for date from index historical candles."""
+        inst = _resolve_nifty_index_key()
+
+        # Prefer daily candle open. If daily is absent, fallback to first 1-minute candle.
+        try:
+            day_df = fetch_intraday_data(inst, access_token, interval="day", mode="date_range", start=date_iso, end=date_iso)
+            if day_df is not None and not day_df.empty and "Open" in day_df.columns:
+                return float(day_df.iloc[0]["Open"])
+        except Exception:
+            pass
+
+        try:
+            min_df = fetch_intraday_data(inst, access_token, interval="1minute", mode="date_range", start=date_iso, end=date_iso)
+            if min_df is not None and not min_df.empty and "Open" in min_df.columns:
+                return float(min_df.iloc[0]["Open"])
+        except Exception:
+            pass
+
+        return None
 
     def _load_historical_orders_df():
         if not os.path.exists(historical_file_path):
@@ -333,6 +431,86 @@ def define_server(input, output, session):
     @render.ui
     def historical_orders_status():
         return ui.tags.span(historical_orders_status_msg.get(), class_="oh-status-text")
+
+    @output
+    @render.text
+    def historical_backtest_status():
+        return historical_bt_status_msg.get()
+
+    @output
+    @render.ui
+    def historical_backtest_summary():
+        df = historical_bt_data.get()
+        if df is None or df.empty:
+            return ui.tags.span("[INFO] Summary will appear after running Historical Backtest", class_="oh-status-text")
+
+        work = df.copy()
+        if "Date" in work.columns:
+            work = work[work["Date"].astype(str) != "TOTAL"].copy()
+        if work.empty:
+            return ui.tags.span("[INFO] No backtest rows available for summary", class_="oh-status-text")
+
+        work["Return (%)"] = pd.to_numeric(work.get("Return (%)", 0.0), errors="coerce").fillna(0.0)
+        work["Total Profit (₹)"] = pd.to_numeric(work.get("Total Profit (₹)", 0.0), errors="coerce").fillna(0.0)
+
+        rows_count = len(work)
+        days_count = work["Date"].astype(str).nunique() if "Date" in work.columns else 0
+        total_invested = float(rows_count * 100000.0)
+        total_return_amount = float(work["Total Profit (₹)"].sum())
+        total_pnl_pct = (total_return_amount / total_invested) * 100.0 if total_invested > 0 else 0.0
+
+        comp_capital = 100000.0
+        if "Side" in work.columns:
+            side_order = {"CE": 0, "PE": 1}
+            work["_side"] = work["Side"].astype(str).str.upper().map(side_order).fillna(9)
+            work = work.sort_values(["Date", "_side"]).drop(columns=["_side"])
+        else:
+            work = work.sort_values(["Date"])
+        for r in work["Return (%)"].tolist():
+            comp_capital *= (1.0 + (float(r) / 100.0))
+        comp_final_return = comp_capital - 100000.0
+        comp_final_pct = ((comp_capital / 100000.0) - 1.0) * 100.0
+
+        def _fmt_inr(v):
+            return f"₹{v:,.2f}"
+        
+        def _section_card(title, rows, bg):
+            tr_nodes = []
+            for k, v in rows:
+                tr_nodes.append(
+                    ui.tags.tr(
+                        ui.tags.td(k, style="padding:7px 10px; color:#9fb3d9; font-size:12px; border-bottom:1px solid rgba(147,170,210,0.14);"),
+                        ui.tags.td(v, style="padding:7px 10px; text-align:right; font-weight:700; color:#eaf1ff; border-bottom:1px solid rgba(147,170,210,0.14);"),
+                    )
+                )
+            return ui.div(
+                ui.tags.div(title, style="font-size:13px; font-weight:700; letter-spacing:0.4px; color:#d9e7ff; margin-bottom:8px;"),
+                ui.tags.table(
+                    ui.tags.tbody(*tr_nodes),
+                    style="width:100%; border-collapse:collapse;",
+                ),
+                style=f"flex:1; min-width:320px; background:{bg}; border:1px solid rgba(147,170,210,0.22); border-radius:8px; padding:10px 12px;",
+            )
+
+        normal_rows = [
+            ("Backtest Days", str(days_count)),
+            ("Rows (CE+PE)", str(rows_count)),
+            ("Total Invested", _fmt_inr(total_invested)),
+            ("Total Return Amount", _fmt_inr(total_return_amount)),
+            ("Total PnL %", f"{total_pnl_pct:.2f}%"),
+        ]
+        comp_rows = [
+            ("Initial Investment (Day 1)", _fmt_inr(100000.0)),
+            ("Compounding Final Capital", _fmt_inr(comp_capital)),
+            ("Compounding Final Return", _fmt_inr(comp_final_return)),
+            ("Compounding Final Return %", f"{comp_final_pct:.2f}%"),
+        ]
+
+        return ui.div(
+            _section_card("Normal Return Summary", normal_rows, "rgba(11, 22, 38, 0.86)"),
+            _section_card("Compounding Summary", comp_rows, "rgba(20, 27, 45, 0.86)"),
+            style="display:flex; gap:10px; flex-wrap:wrap; width:100%;",
+        )
 
     def _get_total_pnl():
         df = order_log.get()
@@ -1771,6 +1949,9 @@ def define_server(input, output, session):
                 current = input.instrument()
             except Exception:
                 current = None
+            # Respect manual instrument input if user typed something different.
+            if current and str(current).strip() and str(current).strip() != str(key).strip():
+                return
             if current != key:
                 try:
                     ui.update_text("instrument", value=key, session=session)
@@ -1779,6 +1960,19 @@ def define_server(input, output, session):
                     logger.warning("Could not update input instrument via ui.update_text in sync: %s", e)
         except Exception as e:
             logger.warning("_sync_selected_instrument error: %s", e)
+
+    @reactive.effect
+    def _respect_manual_instrument_override():
+        """If user types a different instrument key manually, stop forcing selected key."""
+        key = selected_instrument_key.get()
+        if not key:
+            return
+        try:
+            typed = (input.instrument() or "").strip()
+        except Exception:
+            typed = ""
+        if typed and typed != str(key).strip():
+            selected_instrument_key.set(None)
 
     # ===== Data Fetching & Processing =====
     @reactive.effect
@@ -1790,7 +1984,9 @@ def define_server(input, output, session):
             return
         try:
             key = selected_instrument_key.get()
-            inst = key if key else input.instrument().strip()
+            inst_input = (input.instrument() or "").strip()
+            # Prefer manual input from Data & Processing; fallback to selected key.
+            inst = inst_input if inst_input else key
 
             if not inst or inst == "NSE_FO|40088":
                 status_msg.set("[ERROR] Please select an instrument")
@@ -1900,13 +2096,14 @@ def define_server(input, output, session):
             
             # Concatenate with previous day's data for indicator warmup
             if mode == "expired":
+                concat_inst = base_inst
                 raw_df = concatenate_with_previous_day(
-                    raw_df, inst, token.get(), target_date_str, 
+                    raw_df, concat_inst, token.get(), target_date_str,
                     interval=interval, mode="expired", expiry_for_expired=expiry_iso
                 )
             else:
                 raw_df = concatenate_with_previous_day(
-                    raw_df, inst, token.get(), target_date_str, 
+                    raw_df, inst, token.get(), target_date_str,
                     interval=interval, mode="date_range"
                 )
 
@@ -1967,6 +2164,228 @@ def define_server(input, output, session):
         except Exception as e:
             status_msg.set(f"[ERROR] Backtest error: {str(e)}")
             traceback.print_exc()
+
+    @reactive.effect
+    @reactive.event(input.run_historical_backtest)
+    def _run_historical_backtest():
+        access_token = token.get()
+        if not access_token:
+            historical_bt_status_msg.set("[ERROR] Authenticate first")
+            return
+
+        try:
+            start_raw = input.historical_bt_start()
+            end_raw = input.historical_bt_end()
+            start_iso = _as_iso(start_raw)
+            end_iso = _as_iso(end_raw)
+            start_dt = _dt.strptime(start_iso, "%Y-%m-%d").date()
+            end_dt = _dt.strptime(end_iso, "%Y-%m-%d").date()
+            if end_dt < start_dt:
+                historical_bt_status_msg.set("[ERROR] End date must be >= start date")
+                return
+        except Exception as exc:
+            historical_bt_status_msg.set(f"[ERROR] Invalid date range: {exc}")
+            return
+
+        try:
+            if not instruments_loaded.get():
+                instrument_manager.fetch_instruments(exchange="NSE", force_refresh=False, prefer_local=False)
+                instruments_loaded.set(True)
+        except Exception:
+            pass
+
+        historical_bt_status_msg.set("[INFO] Running historical backtest...")
+        rows = []
+        processed_days = 0
+        skipped_days = 0
+        expiry_dates = []
+        try:
+            expiries_raw = instrument_manager.get_expiry_dates("NIFTY", instrument_type="CE")
+            expiry_dates = sorted(
+                [
+                    _dt.strptime(str(e), "%Y-%m-%d").date()
+                    for e in (expiries_raw or [])
+                    if e is not None and str(e).strip() != ""
+                ]
+            )
+        except Exception:
+            expiry_dates = []
+
+        cursor = start_dt
+        while cursor <= end_dt:
+            day_iso = cursor.strftime("%Y-%m-%d")
+            if cursor.weekday() >= 5:
+                skipped_days += 1
+                cursor += timedelta(days=1)
+                continue
+
+            nifty_open = _fetch_nifty_open_for_date(access_token, day_iso)
+            if nifty_open is None or pd.isna(nifty_open):
+                skipped_days += 1
+                cursor += timedelta(days=1)
+                continue
+
+            processed_days += 1
+            pe_strike = int(math.floor(float(nifty_open) / 100.0) * 100)
+            ce_strike = int(math.ceil(float(nifty_open) / 100.0) * 100)
+            if ce_strike == pe_strike:
+                ce_strike += 100
+
+            expiry_iso = _next_available_expiry_for_day(cursor, expiry_dates)
+            if not expiry_iso:
+                skipped_days += 1
+                cursor += timedelta(days=1)
+                continue
+            strike_plan = [("CE", ce_strike), ("PE", pe_strike)]
+
+            for side, strike in strike_plan:
+                metrics_row = {
+                    "Date": day_iso,
+                    "Side": side,
+                    "Instrument Key": "",
+                    "Trades": 0,
+                    "Return (%)": 0.0,
+                    "Buy & Hold Return (%)": 0.0,
+                    "Best Trade (%)": 0.0,
+                    "Worst Trade (%)": 0.0,
+                    "Total Profit (₹)": 0.0,
+                    "Winning Trades": 0,
+                    "Losing Trades": 0,
+                    "Expectancy per Trade (%)": 0.0,
+                }
+                try:
+                    base_inst = instrument_manager.get_instrument_key("NIFTY", expiry_iso, strike, side)
+                    if not base_inst:
+                        rows.append(metrics_row)
+                        continue
+                    metrics_row["Instrument Key"] = str(base_inst)
+
+                    day_df = fetch_intraday_data(
+                        base_inst,
+                        access_token,
+                        interval="1minute",
+                        mode="expired",
+                        start=day_iso,
+                        end=day_iso,
+                        expiry_for_expired=expiry_iso,
+                    )
+                    if day_df is None or day_df.empty:
+                        rows.append(metrics_row)
+                        continue
+
+                    raw_df = concatenate_with_previous_day(
+                        day_df,
+                        base_inst,
+                        access_token,
+                        day_iso,
+                        interval="1minute",
+                        mode="expired",
+                        expiry_for_expired=expiry_iso,
+                        previous_rows=60,
+                    )
+
+                    df_calc = calculate_indicators(raw_df)
+                    df_calc = detect_regimes_relaxed(df_calc)
+                    df_calc = classify_trend_by_angles(df_calc)
+                    df_calc = add_long_signal(df_calc)
+                    df_day = filter_to_current_day(df_calc, day_iso)
+                    if df_day is None or df_day.empty:
+                        rows.append(metrics_row)
+                        continue
+
+                    trades_df = calculate_manual_pnl(df_day, initial_cash=100000, commission=0.0)
+                    summary = get_summary_stats_manual(df_day, trades_df, initial_cash=100000)
+
+                    if isinstance(summary, dict) and "Message" not in summary:
+                        metrics_row["Trades"] = int(summary.get("# Trades", 0) or 0)
+                        metrics_row["Expectancy per Trade (%)"] = float(summary.get("Expectancy per Trade [%]", 0.0) or 0.0)
+                        metrics_row["Return (%)"] = float(summary.get("Return [%]", 0.0) or 0.0)
+                        metrics_row["Buy & Hold Return (%)"] = float(summary.get("Buy & Hold Return [%]", 0.0) or 0.0)
+                        metrics_row["Best Trade (%)"] = float(summary.get("Best Trade [%]", 0.0) or 0.0)
+                        metrics_row["Worst Trade (%)"] = float(summary.get("Worst Trade [%]", 0.0) or 0.0)
+                        metrics_row["Total Profit (₹)"] = float(summary.get("Total Profit [$]", 0.0) or 0.0)
+                        metrics_row["Winning Trades"] = int(summary.get("Winning Trades", 0) or 0)
+                        metrics_row["Losing Trades"] = int(summary.get("Losing Trades", 0) or 0)
+                    rows.append(metrics_row)
+                except Exception:
+                    rows.append(metrics_row)
+
+            cursor += timedelta(days=1)
+
+        out_df = pd.DataFrame(rows)
+        if out_df.empty:
+            historical_bt_data.set(pd.DataFrame({"Message": ["No historical backtest rows generated"]}))
+            historical_bt_status_msg.set("[WARN] No rows generated for selected range")
+            return
+
+        for c in [
+            "Expectancy per Trade (%)",
+            "Return (%)",
+            "Buy & Hold Return (%)",
+            "Best Trade (%)",
+            "Worst Trade (%)",
+            "Total Profit (₹)",
+        ]:
+            if c in out_df.columns:
+                out_df[c] = pd.to_numeric(out_df[c], errors="coerce").round(2)
+        for c in ["Trades", "Winning Trades", "Losing Trades"]:
+            if c in out_df.columns:
+                out_df[c] = pd.to_numeric(out_df[c], errors="coerce").fillna(0).astype(int)
+
+        side_order = {"CE": 0, "PE": 1}
+        out_df["_side_order"] = out_df["Side"].map(side_order).fillna(9)
+        out_df = out_df.sort_values(["Date", "_side_order"]).drop(columns=["_side_order"]).reset_index(drop=True)
+
+        # Add total row at bottom for high-level summary
+        total_trades = int(pd.to_numeric(out_df.get("Trades", 0), errors="coerce").fillna(0).sum())
+        total_profit = float(pd.to_numeric(out_df.get("Total Profit (₹)", 0.0), errors="coerce").fillna(0.0).sum())
+        total_win = int(pd.to_numeric(out_df.get("Winning Trades", 0), errors="coerce").fillna(0).sum())
+        total_loss = int(pd.to_numeric(out_df.get("Losing Trades", 0), errors="coerce").fillna(0).sum())
+
+        non_empty_rows = len(out_df.index)
+        total_capital = 100000.0 * non_empty_rows if non_empty_rows > 0 else 0.0
+        total_return_pct = round((total_profit / total_capital) * 100.0, 2) if total_capital else 0.0
+        bh_series = pd.to_numeric(out_df.get("Buy & Hold Return (%)", 0.0), errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        total_bh_return_pct = round(float(bh_series.mean()), 2) if not bh_series.empty else 0.0
+
+        exp_series = pd.to_numeric(out_df.get("Expectancy per Trade (%)", 0.0), errors="coerce").fillna(0.0)
+        trades_series = pd.to_numeric(out_df.get("Trades", 0), errors="coerce").fillna(0.0)
+        total_expectancy = round(float((exp_series * trades_series).sum() / total_trades), 2) if total_trades > 0 else 0.0
+
+        total_row = {col: "" for col in out_df.columns}
+        total_row["Date"] = "TOTAL"
+        total_row["Trades"] = total_trades
+        total_row["Return (%)"] = total_return_pct
+        total_row["Buy & Hold Return (%)"] = total_bh_return_pct
+        total_row["Total Profit (₹)"] = round(total_profit, 2)
+        total_row["Winning Trades"] = total_win
+        total_row["Losing Trades"] = total_loss
+        total_row["Expectancy per Trade (%)"] = total_expectancy
+        out_df = pd.concat([out_df, pd.DataFrame([total_row])], ignore_index=True)
+
+        # Keep expectancy as the last column
+        preferred_cols = [
+            "Date",
+            "Side",
+            "Instrument Key",
+            "Trades",
+            "Return (%)",
+            "Buy & Hold Return (%)",
+            "Best Trade (%)",
+            "Worst Trade (%)",
+            "Total Profit (₹)",
+            "Winning Trades",
+            "Losing Trades",
+            "Expectancy per Trade (%)",
+        ]
+        existing_preferred = [c for c in preferred_cols if c in out_df.columns]
+        extra_cols = [c for c in out_df.columns if c not in existing_preferred]
+        out_df = out_df[existing_preferred + extra_cols]
+
+        historical_bt_data.set(out_df)
+        historical_bt_status_msg.set(
+            f"[OK] Historical backtest complete: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+        )
 
     # ===== Chart Visualization =====
     @output
@@ -2220,6 +2639,34 @@ def define_server(input, output, session):
                 "rows": pct_s.lt(0).fillna(False).tolist(),
                 "style": {"color": "#ff7c6a", "font-weight": "700"},
             })
+
+        return render.DataTable(df, width="100%", height="calc(100vh - 320px)", styles=styles)
+
+    @output
+    @render.data_frame
+    def historical_backtest_table():
+        from shiny import render
+        df = historical_bt_data.get()
+        if df is None or df.empty:
+            return render.DataTable(pd.DataFrame({"Message": ["Run Historical Backtest to see results"]}))
+
+        styles = [
+            {
+                "cols": list(df.columns),
+                "rows": [True] * len(df),
+                "style": {"text-align": "center"},
+            }
+        ]
+        if "Side" in df.columns:
+            side_s = df["Side"].astype(str).str.upper()
+            styles.append({"cols": ["Side"], "rows": side_s.eq("CE").tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
+            styles.append({"cols": ["Side"], "rows": side_s.eq("PE").tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
+
+        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Total Profit (₹)", "Expectancy per Trade (%)"]:
+            if col in df.columns:
+                s = pd.to_numeric(df[col], errors="coerce")
+                styles.append({"cols": [col], "rows": s.gt(0).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
+                styles.append({"cols": [col], "rows": s.lt(0).fillna(False).tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
 
         return render.DataTable(df, width="100%", height="calc(100vh - 320px)", styles=styles)
 

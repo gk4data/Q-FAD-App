@@ -336,8 +336,14 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                   & (df['High'] > df['BBU']) & (df['Close'] > df['Close'].shift(2)) & (df['Close'] > df['Close'].shift(1)) & (df['volume_profile'] == 1))
                                   | ((df['Low'].shift(3) < df['BBL'].shift(3)) & (df['volume_profile'].shift(3) == 0) & (df['High'].shift(2) > df['BBU'].shift(2)) 
                                   & (df['High'].shift(1) > df['BBU'].shift(1)) & (df['High'] > df['BBU']) & (df['Close'] > df['Close'].shift(2)) 
-                                  & (df['Close'] > df['Close'].shift(1)) & (df['volume_profile'] == 1)))
+                                  & (df['Close'] > df['Close'].shift(1)) & (df['volume_profile'] == 1))
                                 )
+                                | (((df['EMA9'].shift(5) > df['BBM'].shift(5)) | (df['EMA9'].shift(6) > df['BBM'].shift(6)))
+                                   & ((df['EMA9'].shift(3) < df['BBM'].shift(3)) | (df['EMA9'].shift(4) < df['BBM'].shift(4)) | (df['EMA9'].shift(2) < df['BBM'].shift(2)))
+                                   & ((df['EMA9'].shift(1) > df['BBM'].shift(1)) | (df['EMA9'] > df['BBM']))
+                                  #  & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend') & ((df['regime'] == 'other'))
+                                   & (df['BBU_Angle_Degree'] < 160) & (df['BBU_Angle_Degree'].shift(1) < 160)
+                                ))
     
     prev_close_less_bbl_4 =  (df['Low'].shift(4) < df['BBL'].shift(4)) & (df['Trend'].shift(4) == 'Downtrend') &  (df['EMA_Trend'].shift(4) == 'Downtrend')
     prev_close_less_bbl_5 =  (df['Low'].shift(5) < df['BBL'].shift(5)) & (df['Trend'].shift(5) == 'Downtrend') &  (df['EMA_Trend'].shift(5) == 'Downtrend')
@@ -377,7 +383,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2 & trade_allowed
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & trade_allowed
     df['RSI_pct_buy'] = RSI_pct_buy_signal & trade_allowed
-    df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse & (df['Date'].dt.time > pd.to_datetime('09:18:00').time()) & allowed_trade_series  #& trade_allowed
-    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time > pd.to_datetime('09:22:00').time()) & allowed_trade_series 
+    df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse & (df['Date'].dt.time > pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series  #& trade_allowed
+    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time > pd.to_datetime('09:22:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series 
 
     return df

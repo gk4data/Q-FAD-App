@@ -250,6 +250,23 @@ def create_main_ui():
                     ui.nav_panel(ui.HTML("<i class='bi bi-graph-up'></i> Chart"), ui.div(output_widget("price_plot"), class_="chart-container")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-activity'></i> Signals"), ui.div(ui.download_button("download_csv", ui.HTML("<i class='bi bi-download'></i> Download Signals CSV"), class_="btn-success"), ui.output_data_frame("signals_table"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-bar-chart'></i> Backtest"), ui.div(ui.output_ui("backtest_summary"), style="padding:16px;")),
+                    ui.nav_panel(
+                        ui.HTML("<i class='bi bi-clock'></i> Historical Backtest"),
+                        ui.div(
+                            ui.div(
+                                ui.row(
+                                    ui.column(3, ui.input_date("historical_bt_start", "From", value=date.today())),
+                                    ui.column(3, ui.input_date("historical_bt_end", "To", value=date.today())),
+                                    ui.column(3, ui.input_action_button("run_historical_backtest", ui.HTML("<i class='bi bi-play-fill'></i> Run"), class_="btn-primary")),
+                                ),
+                                class_="order-history-actions",
+                            ),
+                            ui.div(ui.output_text_verbatim("historical_backtest_status"), class_="order-history-status"),
+                            ui.div(ui.output_ui("historical_backtest_summary"), class_="order-history-status"),
+                            ui.div(ui.output_data_frame("historical_backtest_table"), class_="order-history-table-wrap"),
+                            class_="order-history-panel",
+                        ),
+                    ),
                     ui.nav_panel(ui.HTML("<i class='bi bi-receipt'></i> Trades"), ui.div(ui.output_data_frame("trades_table"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-flask'></i> Live Trading"), ui.div(ui.output_text_verbatim("position_status"), ui.output_data_frame("orders_table"), style="padding:16px;")),
                     ui.nav_panel(
