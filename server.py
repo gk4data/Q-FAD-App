@@ -1457,6 +1457,25 @@ def define_server(input, output, session):
             avg_price = None
         return avg_price, status, filled_qty
 
+    def _select_latest_completed_candle(df: pd.DataFrame):
+        """Return the latest completed 1-minute candle row and its timestamp."""
+        if df is None or df.empty or "Date" not in df.columns:
+            return None, None
+        work = df.copy()
+        work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+        work = work.dropna(subset=["Date"]).sort_values("Date")
+        if work.empty:
+            return None, None
+
+        now = _dt.now().replace(second=0, microsecond=0)
+        cutoff = now - timedelta(minutes=1)
+        completed = work[work["Date"] <= cutoff]
+        if completed.empty:
+            row = work.iloc[-1]
+        else:
+            row = completed.iloc[-1]
+        return row, row.get("Date")
+
     def _maybe_execute_trade(df):
         if not live_trading_enabled.get():
             return
@@ -1465,8 +1484,10 @@ def define_server(input, output, session):
         if df is None or df.empty:
             return
 
-        last_row = df.iloc[-1]
-        ts_val = last_row.get("Date")
+        last_row, ts_val = _select_latest_completed_candle(df)
+        if last_row is None:
+            return
+        latest_ts = pd.to_datetime(df["Date"], errors="coerce").max() if "Date" in df.columns else None
         if ts_val is None or pd.isna(ts_val):
             return
         if last_traded_ts.get() == ts_val:
@@ -1487,8 +1508,9 @@ def define_server(input, output, session):
         )
         sell_signal = bool(last_row.get("Sell_Signal", False))
         logger.info(
-            "Live trading check: latest=%s buy=%s sell=%s",
+            "Live trading check: selected=%s latest=%s buy=%s sell=%s",
             ts_val,
+            latest_ts,
             buy_signal,
             sell_signal,
         )
@@ -1519,20 +1541,27 @@ def define_server(input, output, session):
         except Exception:
             price = None
 
+        manual_lot_sizing = False
         if _use_production_trading():
             capital = funds_available.get() or 0
+            manual_lot_sizing = bool(input.live_use_manual_lots())
+            selected_lots = input.live_lots() if manual_lot_sizing else None
             sl_pct = input.live_sl_percent()
             product_type = input.live_product_type()
         else:
             capital = input.sandbox_capital()
+            selected_lots = None
             sl_pct = input.sandbox_sl_percent()
             product_type = input.sandbox_product_type()
         state = position_state.get() or {}
         lot_size = instrument_manager.get_lot_size(inst)
-        qty = _calculate_qty(price, capital, lot_size)
+        qty = _calculate_qty(price, capital, lot_size, selected_lots)
 
         if buy_signal and not state.get("open") and qty <= 0:
-            trade_status_msg.set("[ERROR] Quantity calculated as 0; check capital/price/lot size")
+            if _use_production_trading() and manual_lot_sizing:
+                trade_status_msg.set("[ERROR] Insufficient capital for selected lots; check capital/price/lot size")
+            else:
+                trade_status_msg.set("[ERROR] Quantity calculated as 0; check capital/price/lot size")
             _append_order_log("SKIP", inst, qty, price, None, "error", "Quantity is 0")
             last_signal_key.set(signal_key)
             return
@@ -1741,13 +1770,22 @@ def define_server(input, output, session):
             trade_status_msg.set(f"[ERROR] Trading error: {err}")
             _append_order_log("ERROR", inst, qty, price, None, "error", err)
 
-    def _calculate_qty(price, capital, lot_size):
+    def _calculate_qty(price, capital, lot_size, selected_lots=None):
         if price is None or price <= 0:
             return 0
-        qty = int(capital // price)
-        if lot_size and lot_size > 1:
-            qty = (qty // lot_size) * lot_size
-        return max(qty, 0)
+        lot_unit = int(lot_size) if lot_size and lot_size > 1 else 1
+        affordable_qty = int(capital // price)
+        affordable_qty = (affordable_qty // lot_unit) * lot_unit
+        if selected_lots is None:
+            return max(affordable_qty, 0)
+        try:
+            requested_lots = max(int(selected_lots), 1)
+        except Exception:
+            requested_lots = 1
+        requested_qty = requested_lots * lot_unit
+        if affordable_qty < requested_qty:
+            return 0
+        return requested_qty
 
     @reactive.effect
     def _init_historical_orders():

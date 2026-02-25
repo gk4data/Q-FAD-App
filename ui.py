@@ -125,6 +125,19 @@ def websocket_card():
 
 def live_trading_card():
     return ui.div(
+        ui.h6("Live Trading (Production)", style=SIDEBAR_HEADER_STYLE),
+        ui.input_checkbox("confirm_live_trading", "I understand this will place real orders", value=False),
+        ui.input_checkbox("live_use_manual_lots", "Use manual lots", value=False),
+        ui.input_numeric("live_lots", "Lots", value=1, min=1, step=1),
+        ui.input_numeric("live_sl_percent", "Stop Loss %", value=15, min=1, max=50),
+        ui.input_select("live_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
+        ui.row(
+            ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start Live"), class_="btn-warning")),
+            ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+        ),
+
+        ui.tags.hr(),
+
         ui.h6("Sandbox Trading", style=SIDEBAR_HEADER_STYLE),
         ui.input_password("sandbox_token", "Sandbox Token"),
         ui.input_numeric("sandbox_capital", "Available Capital", value=1000, min=1),
@@ -133,17 +146,6 @@ def live_trading_card():
         ui.row(
             ui.column(6, ui.input_action_button("start_sandbox", ui.HTML("<i class='bi bi-play-fill'></i> Start Sandbox"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_sandbox", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
-        ),
-
-        ui.tags.hr(),
-
-        ui.h6("Live Trading (Production)", style=SIDEBAR_HEADER_STYLE),
-        ui.input_checkbox("confirm_live_trading", "I understand this will place real orders", value=False),
-        ui.input_numeric("live_sl_percent", "Stop Loss %", value=15, min=1, max=50),
-        ui.input_select("live_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
-        ui.row(
-            ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start Live"), class_="btn-warning")),
-            ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
 
         ui.output_text_verbatim("trade_status"),
