@@ -167,7 +167,7 @@ def create_main_ui():
         # Top bar
         ui.div(
             ui.div(
-                ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algo Trading Platform", style="margin:0;"),
+                ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algo & HFT Trading Platform", style="margin:0;"),
                 class_="topbar-left",
             ),
             ui.div(

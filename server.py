@@ -2452,30 +2452,26 @@ def define_server(input, output, session):
         df = df_data.get()
         if df is None or df.empty:
             return render.DataTable(pd.DataFrame({"Message": ["No data loaded"]}))
-
-        cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-        extras = [
-            'RSI', 'MFI', 'EMA9', 'BBM', 'VWAP',
-            'Buy_Signal', 'Mid_Buy_Signal', 'Mid_Buy_Signal_2',
-            'Super_Low_Buy_Signal', 'RSI_Range_Buy_Signal', 'OverSold_Buy_Signal',
-            'Sell_Signal', 'regime'
-        ]
-        for c in extras:
-            if c in df.columns:
-                cols.append(c)
-        cols = list(dict.fromkeys(cols))
-
-        out = df[cols].tail(200).copy()
-
-        # Format numerics
+        out = df.copy()
         numeric_cols = out.select_dtypes(include=[np.number]).columns
         for col in numeric_cols:
-            out[col] = out[col].round(2)
-
-        if 'Date' in out.columns:
-            out['Date'] = out['Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-
-        return render.DataTable(out, width="100%", height="600px")
+            out[col] = out[col].map(lambda x: f"{float(x):.3f}" if pd.notna(x) else "")
+        if "Date" in out.columns:
+            out["Date"] = pd.to_datetime(out["Date"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+        styles = []
+        if "Date" in out.columns:
+            styles.append({
+                "cols": ["Date"],
+                "style": {
+                    "position": "sticky",
+                    "left": "0px",
+                    "z-index": "3",
+                    "background-color": "#f7f7f7",
+                    "color": "#111111",
+                    "border-right": "1px solid #d9d9d9",
+                },
+            })
+        return render.DataTable(out, width="100%", height="600px", styles=styles)
 
     @output
     @render.ui
