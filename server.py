@@ -3,6 +3,7 @@ import os
 import math
 import logging
 import traceback
+import tempfile
 import pandas as pd
 import numpy as np
 from datetime import date as _date, datetime as _dt, timedelta
@@ -2710,8 +2711,9 @@ def define_server(input, output, session):
         df = df_data.get()
         if df is None or df.empty:
             return ""
-        tmp_dir = os.path.join(os.getcwd(), "tmp_exports")
-        os.makedirs(tmp_dir, exist_ok=True)
-        path = save_to_csv(df, base_dir=tmp_dir, prefix="signals_export")
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+        # Return a real file path for Shiny download; returning CSV text can be
+        # interpreted as a path and trigger Windows "path too long" errors.
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="qfad_sig_", suffix=".csv")
+        os.close(tmp_fd)
+        df.to_csv(tmp_path, index=False)
+        return tmp_path

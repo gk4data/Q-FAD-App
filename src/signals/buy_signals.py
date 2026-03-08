@@ -67,12 +67,16 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
    # --- values at those checkpoints ---
     low_t1   = df['Low'].iloc[idx_t1]
     close_t1 = df['Close'].iloc[idx_t1]
+    high_t1 = df['High'].iloc[idx_t1]
 
     low_t2   = df['Low'].iloc[idx_t2]
     close_t2 = df['Close'].iloc[idx_t2]
+    high_t2 = df['High'].iloc[idx_t2]
+
  
     low_t3   = df['Low'].iloc[idx_t3]
     close_t3 = df['Close'].iloc[idx_t3]
+    high_t3 = df['High'].iloc[idx_t3]
 
    # --- original simple checks you had for "no trade" based on first row ---
     no_trade_at_all_close = (
@@ -90,13 +94,13 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
    # --- trade-if-vwap-back style overrides at checkpoint granularity ---
    # (kept same logic pattern you used: first_high < mid_low -> override)
     trade_if_vwap_back_t1 = (first_close < close_t1)
-    trade_if_vwap_back_t2 = (first_close < close_t2) or (close_t1 < close_t2)
-    trade_if_vwap_back_t3 = (close_t1 < close_t3) or (close_t2 < close_t3)
+    trade_if_vwap_back_t2 = (first_high < high_t2) or (close_t1 < close_t2)
+    trade_if_vwap_back_t3 = (first_high < high_t3) or (close_t2 < close_t3)
    # note: I used your 'last' rule for t3 to preserve previous 'last' logic; change if needed.
 
    # --- VWAP coming down checks (scalar per-check) ---
     vwap_coming_down_t1 = (first_close > low_t1)
-    vwap_coming_down_t2 = (low_t1 > low_t2) and (first_close > close_t2)  # or other measure if you prefer
+    vwap_coming_down_t2 = (low_t1 > low_t2) and (first_high > high_t2)  # or other measure if you prefer
     vwap_coming_down_t3 = (low_t2 > low_t3) and (low_t1 > low_t3)  # or other measure if you prefer
 
    # --- Combine rules into per-row Series using time windows ---
@@ -308,7 +312,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     condtion_alt_prev_close = ((df['Close'] > df['Close'].shift(1)) & (df['Close'] > df['Close'].shift(2)) & (df['BBU_Angle_Degree'].shift(1) > 200)
                                      & (df['Close'] > df['EMA9']) & (df['Close'].shift(1) > df['EMA9'].shift(1)) & (df['EMA_Angle_Degree'] < 140))
     
-    condition_new_uptrend_buy = (((((df['High'].shift(2) > df['BBU'].shift(2)) & ((df['volume_profile'].shift(2) == 1) | ((df['volume_profile'].shift(2) == 0) & (df['Close'].shift(2) > df['EMA9'].shift(2)))))
+    condition_new_uptrend_buy = (
+                                ((((df['High'].shift(2) > df['BBU'].shift(2)) & ((df['volume_profile'].shift(2) == 1) | ((df['volume_profile'].shift(2) == 0) & (df['Close'].shift(2) > df['EMA9'].shift(2)))))
                                    | ((df['High'].shift(3) > df['BBU'].shift(3)) & ((df['volume_profile'].shift(3) == 1)| ((df['volume_profile'].shift(3) == 0) & (df['Close'].shift(3) > df['EMA9'].shift(3)))))
                                    | ((df['High'].shift(4) > df['BBU'].shift(4)) & ((df['volume_profile'].shift(4) == 1)| ((df['volume_profile'].shift(4) == 0) & (df['Close'].shift(4) > df['EMA9'].shift(4)))))
                                    | ((df['High'].shift(5) > df['BBU'].shift(5)) & ((df['volume_profile'].shift(5) == 1)| ((df['volume_profile'].shift(5) == 0) & (df['Close'].shift(5) > df['EMA9'].shift(5)))))
@@ -322,7 +327,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 & (df['volume_profile'] == 1) & ((df['volume_profile'].shift(1) == 0) | (df['Close'].shift(1) < df['EMA9'].shift(1))| condtion_alt_prev_close)
                                 & (df['Close'] > df['Close'].shift(1)) & (df['RSI_pct'].shift(1) <= (df['RSI_pct'])) & (df['BBU_Angle_Degree'] < 210)
                                 & (df['High'] < df['BBU']) & (df['EMA_Angle_Degree'] < 178)
-                                & (((df['Close'] - df['Open'])/df['Close'])*100 >= 1.50))
+                                & (((df['Close'] - df['Open'])/df['Close'])*100 >= 1.50)
+                                & (df['BBU_Angle_Degree'].shift(1).rolling(window=5).mean() < 150))
                                 |
                                 ((df['Trend'] == 'Uptrend') &  (df['EMA_Trend'] == 'Uptrend')
                                 & ((df['EMA9'] < df['Close'].shift(2)) & (df['BBM'] < df['Close'].shift(2))) #& ((df['EMA9'] > df['Close'].shift(1)) & (df['BBM'] > df['Close'].shift(1)))
@@ -343,7 +349,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                    & ((df['EMA9'].shift(1) > df['BBM'].shift(1)) | (df['EMA9'] > df['BBM']))
                                   #  & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend') & ((df['regime'] == 'other'))
                                    & (df['BBU_Angle_Degree'] < 160) & (df['BBU_Angle_Degree'].shift(1) < 160)
-                                ))
+                                )
+                                ) & (((df['volume_profile'] == 1) & ((((df['Close'] - df['Open']) / df['Close']) * 100) < 6.0)) | (df['volume_profile'] == 0))
     
     prev_close_less_bbl_4 =  (df['Low'].shift(4) < df['BBL'].shift(4)) & (df['Trend'].shift(4) == 'Downtrend') &  (df['EMA_Trend'].shift(4) == 'Downtrend')
     prev_close_less_bbl_5 =  (df['Low'].shift(5) < df['BBL'].shift(5)) & (df['Trend'].shift(5) == 'Downtrend') &  (df['EMA_Trend'].shift(5) == 'Downtrend')
