@@ -33,5 +33,5 @@ def main():
 app = main()
 
 if __name__ == "__main__":
-    print("🚀 Starting Q-FAD Upstox Algo Trading App...")
+    print("🚀 Starting Q-FAD: Algo & HFT Trading Platform...")
     print("Run with: shiny run --reload app.py")
