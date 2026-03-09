@@ -32,6 +32,32 @@ def plot_signals(df):
         subplot_titles=("Candlesticks", "Volume", "Adaptive RSI & MFI", "Strength", "Stochastic & BBMAngle")
     )
 
+    # Static buy-session bands (repeated for each date in the data).
+    # Use layout shapes with xref='x' + yref='paper' for broad compatibility.
+    if 'Date' in df.columns and df['Date'].notna().any():
+        session_windows = [
+            ('09:15:00', '10:14:00', 'rgba(30, 58, 95, 0.14)'),   # deep slate-blue
+            ('10:15:00', '11:59:00', 'rgba(17, 94, 89, 0.13)'),   # deep teal
+            ('12:00:00', '13:59:00', 'rgba(30, 58, 95, 0.14)'),  # muted indigo
+            ('14:00:00', '15:28:00', 'rgba(17, 94, 89, 0.13)'),  # muted amber-brown
+        ]
+        for trading_day in df['Date'].dt.normalize().dropna().unique():
+            day_str = pd.Timestamp(trading_day).strftime('%Y-%m-%d')
+            for start_t, end_t, fill_color in session_windows:
+                fig.add_shape(
+                    type='rect',
+                    xref='x',
+                    yref='paper',
+                    x0=f"{day_str} {start_t}",
+                    x1=f"{day_str} {end_t}",
+                    y0=0,
+                    y1=1,
+                    fillcolor=fill_color,
+                    opacity=1.0,
+                    line_width=0,
+                    layer='below'
+                )
+
     # ===== ROW 1: Candlestick Chart =====
     fig.add_trace(
         go.Candlestick(

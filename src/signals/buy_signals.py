@@ -57,6 +57,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     first_high  = df.loc[first_idx, 'High']
     first_low   = df.loc[first_idx, 'Low']
     first_bbl   = df.loc[first_idx, 'BBL']
+    first_bbu   = df.loc[first_idx, 'BBU']
     first_bbm   = df.loc[first_idx, 'BBM']
 
    # --- find indices for the 3 checks (10:15, 12:00, 14:00) ---
@@ -67,12 +68,16 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
    # --- values at those checkpoints ---
     low_t1   = df['Low'].iloc[idx_t1]
     close_t1 = df['Close'].iloc[idx_t1]
+    high_t1 = df['High'].iloc[idx_t1]
 
     low_t2   = df['Low'].iloc[idx_t2]
     close_t2 = df['Close'].iloc[idx_t2]
+    high_t2 = df['High'].iloc[idx_t2]
+
  
     low_t3   = df['Low'].iloc[idx_t3]
     close_t3 = df['Close'].iloc[idx_t3]
+    high_t3 = df['High'].iloc[idx_t3]
 
    # --- original simple checks you had for "no trade" based on first row ---
     no_trade_at_all_close = (
@@ -90,13 +95,13 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
    # --- trade-if-vwap-back style overrides at checkpoint granularity ---
    # (kept same logic pattern you used: first_high < mid_low -> override)
     trade_if_vwap_back_t1 = (first_close < close_t1)
-    trade_if_vwap_back_t2 = (first_close < close_t2) or (close_t1 < close_t2)
-    trade_if_vwap_back_t3 = (close_t1 < close_t3) or (close_t2 < close_t3)
+    trade_if_vwap_back_t2 = (first_high < high_t2) or (close_t1 < close_t2)
+    trade_if_vwap_back_t3 = (first_high < high_t3) or (close_t2 < close_t3)
    # note: I used your 'last' rule for t3 to preserve previous 'last' logic; change if needed.
 
    # --- VWAP coming down checks (scalar per-check) ---
     vwap_coming_down_t1 = (first_close > low_t1)
-    vwap_coming_down_t2 = (low_t1 > low_t2) and (first_close > close_t2)  # or other measure if you prefer
+    vwap_coming_down_t2 = (low_t1 > low_t2) and (first_high > high_t2)  # or other measure if you prefer
     vwap_coming_down_t3 = (low_t2 > low_t3) and (low_t1 > low_t3)  # or other measure if you prefer
 
    # --- Combine rules into per-row Series using time windows ---
@@ -105,15 +110,23 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
         (first_volume_profile == 0) &  # First candle is red
         (df['volume_profile'].shift(-1) == 1) &  # 2nd candle is green (look ahead)
         (df['volume_profile'].shift(-2) == 1) &  # 3rd candle is green
-        (df['volume_profile'].shift(-3) == 1) &  # 4th candle is green
+        ((df['volume_profile'].shift(-3) == 1) | (df['volume_profile'].shift(-4) == 1)) &  # 4th candle is green
         (df['Close'].shift(-1) > df['Close']) &  # 2nd close > 1st close
         (df['Close'].shift(-2) > df['Close'].shift(-1)) &  # 3rd close > 2nd close
-        (df['Close'].shift(-3) > df['Close'].shift(-2))  # 4th close > 3rd close
+        ((df['Close'].shift(-3) > df['Close'].shift(-2)) | (df['Close'].shift(-4) > df['Close'].shift(-3)))  # 4th close > 3rd close
     )
     
+    no_trade_gap_up_red = ((first_close > first_bbu) & (first_open > first_bbu)
+                          & (df['volume_profile'].shift(-1) == 0)  # 2nd candle is red (look ahead)
+                          &  (df['volume_profile'].shift(-2) == 0) # 3rd candle is red
+                          &  (df['volume_profile'].shift(-3) == 0))
+    # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
+    no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
+
     allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow | green_continuation)  # scalar
 
    # time windows for applying each checkpoint rule
+    t0_window = (df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time <= pd.to_datetime('10:14:00').time())
     t1_window = (df['Date'].dt.time > pd.to_datetime('10:14:00').time()) & (df['Date'].dt.time <= pd.to_datetime('11:59:00').time())
     t2_window = (df['Date'].dt.time > pd.to_datetime('11:59:00').time()) & (df['Date'].dt.time <= pd.to_datetime('13:59:00').time())
     t3_window = (df['Date'].dt.time > pd.to_datetime('13:59:00').time())
@@ -132,11 +145,24 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
       (trade_if_vwap_back_t3 & t3_window)
     )
 
-   # final per-row allowed signal:
-    allowed_trade_series = ((allow_basic | trade_if_vwap_back_series) & (~(no_trade_if_vwap_fail)))
+   # base per-row allowed signal (before last-leg prerequisite):
+    base_allowed_trade_series = (
+      (allow_basic | trade_if_vwap_back_series)
+      & (~(no_trade_if_vwap_fail))
+      & (~no_trade_gap_up_red_at_all)
+    )
 
    # apply market-time window (same as you had)
     time_window = (df['Date'].dt.time > pd.to_datetime('09:36:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
+
+   # Last-leg guard: each prior leg must have seen at least one tradable row.
+    t0_had_trade = bool((base_allowed_trade_series & time_window & t0_window).any())
+    t1_had_trade = bool((base_allowed_trade_series & time_window & t1_window).any())
+    t2_had_trade = bool((base_allowed_trade_series & time_window & t2_window).any())
+    allow_t3_from_prior_legs = t0_had_trade or t1_had_trade or t2_had_trade
+
+   # final per-row allowed signal:
+    allowed_trade_series = base_allowed_trade_series & ((~t3_window) | allow_t3_from_prior_legs)
     trade_allowed = time_window & allowed_trade_series
 
 # trade_allowed is a boolean Series you can use to filter or trigger trades
@@ -212,7 +238,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     condition_curr_ema_near_Low & condition_curr_bbm_near_Low & condition_stoch_rsi_crossover & ema_rising_angle_degree & ema_bbm_gap_increase & BBL_angle_lower_condition
     & (bbu_rise_degree | bbm_rise_degree)  & volume_profile_green & (volume_greater_than_prev |volume_greater_than_prev_prev) #& trend_condition_not_down
     & condition_mfi_more_rsi & cond_limit_volume & condition_curr_ema_greater_than_bbm )
-    df['Mid_Buy_Signal'] = condition_bbm_bounce &  trade_allowed #((no_trade_at_all_close & no_trade_at_all_highlow) | trade_if_vwap_back)
+    df['Mid_Buy_Signal'] = condition_bbm_bounce & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series
 
 ## overslod condition
     condition_stoch_over_sold = ((df['STOCHRSIk'].shift(1) < 20) & (df['STOCHRSIk'] > df['STOCHRSId']))
@@ -308,7 +334,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     condtion_alt_prev_close = ((df['Close'] > df['Close'].shift(1)) & (df['Close'] > df['Close'].shift(2)) & (df['BBU_Angle_Degree'].shift(1) > 200)
                                      & (df['Close'] > df['EMA9']) & (df['Close'].shift(1) > df['EMA9'].shift(1)) & (df['EMA_Angle_Degree'] < 140))
     
-    condition_new_uptrend_buy = (((((df['High'].shift(2) > df['BBU'].shift(2)) & ((df['volume_profile'].shift(2) == 1) | ((df['volume_profile'].shift(2) == 0) & (df['Close'].shift(2) > df['EMA9'].shift(2)))))
+    condition_new_uptrend_buy = (
+                                ((((df['High'].shift(2) > df['BBU'].shift(2)) & ((df['volume_profile'].shift(2) == 1) | ((df['volume_profile'].shift(2) == 0) & (df['Close'].shift(2) > df['EMA9'].shift(2)))))
                                    | ((df['High'].shift(3) > df['BBU'].shift(3)) & ((df['volume_profile'].shift(3) == 1)| ((df['volume_profile'].shift(3) == 0) & (df['Close'].shift(3) > df['EMA9'].shift(3)))))
                                    | ((df['High'].shift(4) > df['BBU'].shift(4)) & ((df['volume_profile'].shift(4) == 1)| ((df['volume_profile'].shift(4) == 0) & (df['Close'].shift(4) > df['EMA9'].shift(4)))))
                                    | ((df['High'].shift(5) > df['BBU'].shift(5)) & ((df['volume_profile'].shift(5) == 1)| ((df['volume_profile'].shift(5) == 0) & (df['Close'].shift(5) > df['EMA9'].shift(5)))))
@@ -322,7 +349,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 & (df['volume_profile'] == 1) & ((df['volume_profile'].shift(1) == 0) | (df['Close'].shift(1) < df['EMA9'].shift(1))| condtion_alt_prev_close)
                                 & (df['Close'] > df['Close'].shift(1)) & (df['RSI_pct'].shift(1) <= (df['RSI_pct'])) & (df['BBU_Angle_Degree'] < 210)
                                 & (df['High'] < df['BBU']) & (df['EMA_Angle_Degree'] < 178)
-                                & (((df['Close'] - df['Open'])/df['Close'])*100 >= 1.50))
+                                & (((df['Close'] - df['Open'])/df['Close'])*100 >= 1.50)
+                                & (df['BBU_Angle_Degree'].shift(1).rolling(window=5).mean() < 150))
                                 |
                                 ((df['Trend'] == 'Uptrend') &  (df['EMA_Trend'] == 'Uptrend')
                                 & ((df['EMA9'] < df['Close'].shift(2)) & (df['BBM'] < df['Close'].shift(2))) #& ((df['EMA9'] > df['Close'].shift(1)) & (df['BBM'] > df['Close'].shift(1)))
@@ -343,7 +371,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                    & ((df['EMA9'].shift(1) > df['BBM'].shift(1)) | (df['EMA9'] > df['BBM']))
                                   #  & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend') & ((df['regime'] == 'other'))
                                    & (df['BBU_Angle_Degree'] < 160) & (df['BBU_Angle_Degree'].shift(1) < 160)
-                                ))
+                                )
+                                ) & (((df['volume_profile'] == 1) & ((((df['Close'] - df['Open']) / df['Close']) * 100) < 6.0)) | (df['volume_profile'] == 0))
     
     prev_close_less_bbl_4 =  (df['Low'].shift(4) < df['BBL'].shift(4)) & (df['Trend'].shift(4) == 'Downtrend') &  (df['EMA_Trend'].shift(4) == 'Downtrend')
     prev_close_less_bbl_5 =  (df['Low'].shift(5) < df['BBL'].shift(5)) & (df['Trend'].shift(5) == 'Downtrend') &  (df['EMA_Trend'].shift(5) == 'Downtrend')
@@ -381,9 +410,9 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     
     df['Super_Low_Buy_Signal'] = condition_super_low_buy & trade_allowed
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2 & trade_allowed
-    df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & trade_allowed
+    df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series
     df['RSI_pct_buy'] = RSI_pct_buy_signal & trade_allowed
-    df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse & (df['Date'].dt.time > pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series  #& trade_allowed
-    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time > pd.to_datetime('09:22:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series 
+    df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series  #& trade_allowed
+    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time >= pd.to_datetime('09:22:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series 
 
     return df

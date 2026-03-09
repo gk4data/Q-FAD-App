@@ -125,6 +125,19 @@ def websocket_card():
 
 def live_trading_card():
     return ui.div(
+        ui.h6("Live Trading (Production)", style=SIDEBAR_HEADER_STYLE),
+        ui.input_checkbox("confirm_live_trading", "I understand this will place real orders", value=False),
+        ui.input_checkbox("live_use_manual_lots", "Use manual lots", value=False),
+        ui.input_numeric("live_lots", "Lots", value=1, min=1, step=1),
+        ui.input_numeric("live_sl_percent", "Stop Loss %", value=15, min=1, max=50),
+        ui.input_select("live_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
+        ui.row(
+            ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start Live"), class_="btn-warning")),
+            ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+        ),
+
+        ui.tags.hr(),
+
         ui.h6("Sandbox Trading", style=SIDEBAR_HEADER_STYLE),
         ui.input_password("sandbox_token", "Sandbox Token"),
         ui.input_numeric("sandbox_capital", "Available Capital", value=1000, min=1),
@@ -133,17 +146,6 @@ def live_trading_card():
         ui.row(
             ui.column(6, ui.input_action_button("start_sandbox", ui.HTML("<i class='bi bi-play-fill'></i> Start Sandbox"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_sandbox", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
-        ),
-
-        ui.tags.hr(),
-
-        ui.h6("Live Trading (Production)", style=SIDEBAR_HEADER_STYLE),
-        ui.input_checkbox("confirm_live_trading", "I understand this will place real orders", value=False),
-        ui.input_numeric("live_sl_percent", "Stop Loss %", value=15, min=1, max=50),
-        ui.input_select("live_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
-        ui.row(
-            ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start Live"), class_="btn-warning")),
-            ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
 
         ui.output_text_verbatim("trade_status"),
@@ -165,7 +167,7 @@ def create_main_ui():
         # Top bar
         ui.div(
             ui.div(
-                ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algo Trading Platform", style="margin:0;"),
+                ui.h4(ui.tags.i(class_="bi bi-lightning-charge"), " Q-FAD: Algo & HFT Trading Platform", style="margin:0;"),
                 class_="topbar-left",
             ),
             ui.div(
@@ -248,8 +250,9 @@ def create_main_ui():
             ui.div(
                 ui.navset_tab(
                     ui.nav_panel(ui.HTML("<i class='bi bi-graph-up'></i> Chart"), ui.div(output_widget("price_plot"), class_="chart-container")),
-                    ui.nav_panel(ui.HTML("<i class='bi bi-activity'></i> Signals"), ui.div(ui.download_button("download_csv", ui.HTML("<i class='bi bi-download'></i> Download Signals CSV"), class_="btn-success"), ui.output_data_frame("signals_table"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-bar-chart'></i> Backtest"), ui.div(ui.output_ui("backtest_summary"), style="padding:16px;")),
+                    ui.nav_panel(ui.HTML("<i class='bi bi-receipt'></i> Trades"), ui.div(ui.output_data_frame("trades_table"), style="padding:16px;")),
+                    ui.nav_panel(ui.HTML("<i class='bi bi-activity'></i> Backend Data"), ui.div(ui.download_button("download_csv", ui.HTML("<i class='bi bi-download'></i> Download Signals CSV"), class_="btn-success"), ui.output_data_frame("signals_table"), style="padding:16px;")),
                     ui.nav_panel(
                         ui.HTML("<i class='bi bi-clock'></i> Historical Backtest"),
                         ui.div(
@@ -267,7 +270,6 @@ def create_main_ui():
                             class_="order-history-panel",
                         ),
                     ),
-                    ui.nav_panel(ui.HTML("<i class='bi bi-receipt'></i> Trades"), ui.div(ui.output_data_frame("trades_table"), style="padding:16px;")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-flask'></i> Live Trading"), ui.div(ui.output_text_verbatim("position_status"), ui.output_data_frame("orders_table"), style="padding:16px;")),
                     ui.nav_panel(
                         ui.HTML("<i class='bi bi-clock-history'></i> Daily Order Data"),
