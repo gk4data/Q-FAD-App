@@ -146,8 +146,9 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     )
 
    # base per-row allowed signal (before last-leg prerequisite):
+   # `allow_basic` should influence only the first leg (09:15-10:14).
     base_allowed_trade_series = (
-      (allow_basic | trade_if_vwap_back_series)
+      ((allow_basic & t0_window) | trade_if_vwap_back_series)
       & (~(no_trade_if_vwap_fail))
       & (~no_trade_gap_up_red_at_all)
     )
