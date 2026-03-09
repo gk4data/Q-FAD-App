@@ -57,6 +57,7 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                 & (df['RSI_hi'] > df['RSI']) & (df['RSI_pct']*100 < df['RSI']) & (df['Low'].shift(1) > df['Low']) 
                 & (df['Low'].shift(2) > df['Low']) & volume_profile_red & (df['EMA9'] > df['Low']))
                 | (((df['RSI_hi'].shift(1) > df['RSI'].shift(1)) | (df['RSI_hi'].shift(2) > df['RSI'].shift(2))) & (df['EMA9'] > df['Low'])
+                   & ((df['BBM'] > df['Low']) & ((((df['BBM']) - df['Low']) / df['BBM'])*100 > 0.50))
                    & ((((df['RSI_hi'].shift(1) - df['RSI'].shift(1))/ df['RSI_hi'].shift(1))*100 <= 6) | (((df['RSI_hi'].shift(2) - df['RSI'].shift(2))/ df['RSI_hi'].shift(2))*100 <= 6))
                    & volume_profile_red & (df['Low'] < df['Low'].shift(1)) & (df['Close'] < df['Close'].shift(1)))) & (df['High'] < df['BBU']) & (df['MFI_pct']*100 <= 50) & no_sell_time
     
@@ -113,7 +114,7 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 (((df['Close'].shift(1) >= df['EMA9'].shift(1)) | (df['Close'].shift(2) >= df['EMA9'].shift(2)) | (df['Close'].shift(3) >= df['EMA9'].shift(3)) 
                                  | (df['Close'].shift(4) >= df['EMA9'].shift(4)))
                                  & ((df['EMA_Trend'] == 'Downtrend') | (df['EMA_Trend'] == 'Flat')) & (df['Trend'] == 'Downtrend') & (df['regime'] == 'downtrend')
-                                 & (df['Close'] < df['EMA9']) & (df['volume_profile'] == 0)
+                                 & (df['Close'] < df['EMA9']) & (df['volume_profile'] == 0) & (df['BBM'] > df['Low']) 
                                  & (df['Close'].shift(2) < df['Close'].shift(3)) & (df['Close'].shift(1) < df['Close'].shift(2)) & (df['Close'].shift(1) > df['Close'])))
     
     ema_downside_sell = ((df['regime'] == 'sideways') & (df['volume_profile'] == 0)

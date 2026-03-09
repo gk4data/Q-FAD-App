@@ -57,6 +57,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     first_high  = df.loc[first_idx, 'High']
     first_low   = df.loc[first_idx, 'Low']
     first_bbl   = df.loc[first_idx, 'BBL']
+    first_bbu   = df.loc[first_idx, 'BBU']
     first_bbm   = df.loc[first_idx, 'BBM']
 
    # --- find indices for the 3 checks (10:15, 12:00, 14:00) ---
@@ -115,9 +116,17 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
         ((df['Close'].shift(-3) > df['Close'].shift(-2)) | (df['Close'].shift(-4) > df['Close'].shift(-3)))  # 4th close > 3rd close
     )
     
+    no_trade_gap_up_red = ((first_close > first_bbu) & (first_open > first_bbu)
+                          & (df['volume_profile'].shift(-1) == 0)  # 2nd candle is red (look ahead)
+                          &  (df['volume_profile'].shift(-2) == 0) # 3rd candle is red
+                          &  (df['volume_profile'].shift(-3) == 0))
+    # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
+    no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
+
     allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow | green_continuation)  # scalar
 
    # time windows for applying each checkpoint rule
+    t0_window = (df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time <= pd.to_datetime('10:14:00').time())
     t1_window = (df['Date'].dt.time > pd.to_datetime('10:14:00').time()) & (df['Date'].dt.time <= pd.to_datetime('11:59:00').time())
     t2_window = (df['Date'].dt.time > pd.to_datetime('11:59:00').time()) & (df['Date'].dt.time <= pd.to_datetime('13:59:00').time())
     t3_window = (df['Date'].dt.time > pd.to_datetime('13:59:00').time())
@@ -136,11 +145,24 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
       (trade_if_vwap_back_t3 & t3_window)
     )
 
-   # final per-row allowed signal:
-    allowed_trade_series = ((allow_basic | trade_if_vwap_back_series) & (~(no_trade_if_vwap_fail)))
+   # base per-row allowed signal (before last-leg prerequisite):
+    base_allowed_trade_series = (
+      (allow_basic | trade_if_vwap_back_series)
+      & (~(no_trade_if_vwap_fail))
+      & (~no_trade_gap_up_red_at_all)
+    )
 
    # apply market-time window (same as you had)
     time_window = (df['Date'].dt.time > pd.to_datetime('09:36:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
+
+   # Last-leg guard: each prior leg must have seen at least one tradable row.
+    t0_had_trade = bool((base_allowed_trade_series & time_window & t0_window).any())
+    t1_had_trade = bool((base_allowed_trade_series & time_window & t1_window).any())
+    t2_had_trade = bool((base_allowed_trade_series & time_window & t2_window).any())
+    allow_t3_from_prior_legs = t0_had_trade or t1_had_trade or t2_had_trade
+
+   # final per-row allowed signal:
+    allowed_trade_series = base_allowed_trade_series & ((~t3_window) | allow_t3_from_prior_legs)
     trade_allowed = time_window & allowed_trade_series
 
 # trade_allowed is a boolean Series you can use to filter or trigger trades
