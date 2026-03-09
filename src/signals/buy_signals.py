@@ -117,9 +117,9 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     )
     
     no_trade_gap_up_red = ((first_close > first_bbu) & (first_open > first_bbu)
-                          & (df['volume_profile'].shift(-1) == 0)  # 2nd candle is red (look ahead)
-                          &  (df['volume_profile'].shift(-2) == 0) # 3rd candle is red
-                          &  (df['volume_profile'].shift(-3) == 0))
+                          & (first_volume_profile == 0)  # 1nd candle is red (look ahead)
+                          &  (df['volume_profile'].shift(-1) == 0) # 2rd candle is red
+                          &  (df['volume_profile'].shift(-2) == 0))
     # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
     no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
 
