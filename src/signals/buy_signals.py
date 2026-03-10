@@ -105,16 +105,26 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     vwap_coming_down_t3 = (low_t2 > low_t3) and (low_t1 > low_t3)  # or other measure if you prefer
 
    # --- Combine rules into per-row Series using time windows ---
-    # Check if first candle is red but next 3 candles are green with rising closes
-    green_continuation = (
-        (first_volume_profile == 0) &  # First candle is red
-        (df['volume_profile'].shift(-1) == 1) &  # 2nd candle is green (look ahead)
-        (df['volume_profile'].shift(-2) == 1) &  # 3rd candle is green
-        ((df['volume_profile'].shift(-3) == 1) | (df['volume_profile'].shift(-4) == 1)) &  # 4th candle is green
-        (df['Close'].shift(-1) > df['Close']) &  # 2nd close > 1st close
-        (df['Close'].shift(-2) > df['Close'].shift(-1)) &  # 3rd close > 2nd close
-        ((df['Close'].shift(-3) > df['Close'].shift(-2)) | (df['Close'].shift(-4) > df['Close'].shift(-3)))  # 4th close > 3rd close
-    )
+    # Opening-sequence check: evaluate only the first candles from 09:15 onward.
+    first_pos = int(np.where(df.index == first_idx)[0][0])
+    c1 = first_pos
+    c2 = first_pos + 1
+    c3 = first_pos + 2
+    c4 = first_pos + 3
+    c5 = first_pos + 4
+
+    if c4 < len(df):
+        green_continuation = (
+            (first_volume_profile == 0) and
+            (df.iloc[c2]['volume_profile'] == 1) and
+            (df.iloc[c3]['volume_profile'] == 1) and
+            ((df.iloc[c4]['volume_profile'] == 1) or ((c5 < len(df)) and (df.iloc[c5]['volume_profile'] == 1))) and
+            (df.iloc[c2]['Close'] > df.iloc[c1]['Close']) and
+            (df.iloc[c3]['Close'] > df.iloc[c2]['Close']) and
+            ((df.iloc[c4]['Close'] > df.iloc[c3]['Close']) or ((c5 < len(df)) and (df.iloc[c5]['Close'] > df.iloc[c4]['Close'])))
+        )
+    else:
+        green_continuation = False
     
     no_trade_gap_up_red = ((first_close > first_bbu) & (first_open > first_bbu)
                           & (first_volume_profile == 0)  # 1nd candle is red (look ahead)
@@ -195,7 +205,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     prev_close_less_ema_bbm_2 =  (df['Close'].shift(3) < df['BBM'].shift(3))
     prev_close_less_ema_bbm_3 =  (df['Close'].shift(4) < df['BBM'].shift(4))
     prev_close_less_ema_bbm_4 =  (df['Close'].shift(5) < df['BBM'].shift(5))
-    high_higher_than_bbu = (df['High'] > df['BBU'])
+    high_higher_than_bbu = ((df['High'] > df['BBU']) & ((((df['High'] - df['Close'])/(df['High']))*100) < 3))
     bbu_rise_degree = (df['BBU_Angle_Degree'].shift(1) <= 178) & (df['BBU_Angle_Degree'] < df['BBU_Angle_Degree'].shift(1))
     bbm_rise_degree = (df['BBM_Angle_Degree'].shift(1) <= 180) & (df['BBM_Angle_Degree'] < df['BBM_Angle_Degree'].shift(1))
     ema_rise = (abs((df['EMA9'].shift(1) - df['EMA9']))/ df['EMA9'].shift(1))*100 > 0.55
@@ -216,7 +226,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
         (condition_stochrsi_crossover & (df['Volume'] > df['Volume'].shift(1)) #& (df['Low'] < df['EMA9'])
          & (prev_close_less_ema_bbm_1 | prev_close_less_ema_bbm_3 | prev_close_less_ema_bbm_2 | prev_close_less_ema_bbm_4) & cond_limit_volume_3
          & high_higher_than_bbu & bbm_rise_degree & (df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'] < df['EMA_Angle_Degree'].shift(1))) 
-         ) & (df['BBU_Angle_Degree'].shift(1) < 250) & trade_allowed & ~avoid_condition_sideway_rise
+         ) & (df['BBU_Angle_Degree'].shift(1) < 250) & trade_allowed & ~avoid_condition_sideway_rise 
     
         
 # Middle buy signal conditions
@@ -330,7 +340,8 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                             & ((df['BBU'].shift(1) > df['BBU'].shift(2)) & (df['BBL'].shift(1) < df['BBL'].shift(2)))
                             & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend') & ((df['regime'] == 'sideways') | (df['regime'] == 'other'))
                             & (df['High'] > df['BBU']) & (df['EMA9'] > df['BBM']) & ((df['volume_profile'] == 1)
-                            | ((df['volume_profile'] == 0) & (df['Close'] > df['Open'].shift(1)) & (df['Close'] > df['EMA9']) & (df['Open'] > df['BBU'])))))
+                            | ((df['volume_profile'] == 0) & (df['Close'] > df['Open'].shift(1)) & (df['Close'] > df['EMA9']) & (df['Open'] > df['BBU']))))
+                            ) & ((((df['High'] - df['Close'])/(df['High']))*100) < 3)
                             
     condtion_alt_prev_close = ((df['Close'] > df['Close'].shift(1)) & (df['Close'] > df['Close'].shift(2)) & (df['BBU_Angle_Degree'].shift(1) > 200)
                                      & (df['Close'] > df['EMA9']) & (df['Close'].shift(1) > df['EMA9'].shift(1)) & (df['EMA_Angle_Degree'] < 140))
