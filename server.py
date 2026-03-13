@@ -4,6 +4,7 @@ import math
 import logging
 import traceback
 import tempfile
+import requests
 import pandas as pd
 import numpy as np
 from datetime import date as _date, datetime as _dt, timedelta
@@ -196,6 +197,55 @@ def define_server(input, output, session):
             pass
 
         return canonical
+
+    def _resolve_underlying_index_key(symbol: str, exchange: str = "NSE") -> str | None:
+        """Resolve underlying index key used by Upstox expired options contract API."""
+        ex = str(exchange or "").strip().upper()
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return None
+
+        # Known NSE index mappings used by options.
+        known_nse = {
+            "NIFTY": "NSE_INDEX|Nifty 50",
+            "BANKNIFTY": "NSE_INDEX|Nifty Bank",
+            "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
+            "MIDCPNIFTY": "NSE_INDEX|NIFTY MID SELECT",
+            "SENSEX": "BSE_INDEX|SENSEX",
+            "BANKEX": "BSE_INDEX|BANKEX",
+        }
+        if ex == "NSE" and sym in known_nse:
+            return known_nse[sym]
+
+        # Fallback: find matching index key from loaded instrument master.
+        try:
+            df_all = instrument_manager.df
+            if df_all is None or df_all.empty or "instrument_key" not in df_all.columns:
+                return None
+
+            work = df_all.copy()
+            work["instrument_key"] = work["instrument_key"].astype(str)
+            if "name" in work.columns:
+                work["name"] = work["name"].astype(str)
+            else:
+                work["name"] = ""
+
+            prefixes = ["NSE_INDEX|", "BSE_INDEX|"] if ex == "NSE" else ["MCX_INDEX|", "NSE_INDEX|", "BSE_INDEX|"]
+            idx_rows = work[work["instrument_key"].str.startswith(tuple(prefixes), na=False)]
+            if idx_rows.empty:
+                return None
+
+            exact = idx_rows[idx_rows["name"].str.strip().str.upper() == sym]
+            if not exact.empty:
+                return str(exact.iloc[0]["instrument_key"])
+
+            key_like = idx_rows[idx_rows["instrument_key"].str.contains(sym, case=False, na=False)]
+            if not key_like.empty:
+                return str(key_like.iloc[0]["instrument_key"])
+        except Exception:
+            return None
+
+        return None
 
     def _fetch_nifty_open_for_date(access_token: str, date_iso: str) -> float | None:
         """Fetch NIFTY open for date from index historical candles."""
@@ -1084,6 +1134,123 @@ def define_server(input, output, session):
                 status_msg.set(f"[ERROR] Instrument not found")
         except Exception as e:
             status_msg.set(f"[ERROR] Error: {e}")
+            traceback.print_exc()
+
+    @reactive.effect
+    @reactive.event(input.get_expired_instrument)
+    def _get_expired_instrument():
+        from shiny import ui
+
+        symbol = input.select_symbol()
+        expiry = input.select_expiry()
+        strike_val = input.select_strike()
+        instr_type = input.select_type()
+        exchange = input.exchange()
+
+        if not all([symbol, expiry, instr_type]):
+            status_msg.set("[ERROR] Select Symbol, Expiry, and Type first")
+            return
+
+        try:
+            access_token = token.get()
+            if not access_token:
+                status_msg.set("[ERROR] Authenticate first")
+                return
+
+            if not instruments_loaded.get():
+                loaded = instrument_manager.fetch_instruments(exchange=exchange, force_refresh=False, prefer_local=False)
+                if not loaded:
+                    status_msg.set("[ERROR] Instrument master not loaded. Click 'Load Instruments' first.")
+                    return
+                instruments_loaded.set(True)
+
+            expiry_iso = _as_iso(expiry)
+
+            if instr_type == 'FUT':
+                strike_num = None
+            else:
+                if not strike_val:
+                    status_msg.set("[ERROR] Select Strike for Options")
+                    return
+                strike_clean = str(strike_val).strip().replace(",", "")
+                strike_num = int(float(strike_clean))
+
+            if instr_type not in ("CE", "PE"):
+                status_msg.set("[ERROR] Get Expired Instrument currently supports CE/PE options")
+                return
+
+            underlying_key = _resolve_underlying_index_key(symbol, exchange=exchange)
+            if not underlying_key:
+                status_msg.set("[ERROR] Could not resolve underlying index key for selected symbol")
+                return
+
+            status_msg.set(f"[INFO] Fetching expired contracts from Upstox API for {symbol} {expiry_iso}...")
+            resp = requests.get(
+                "https://api.upstox.com/v2/expired-instruments/option/contract",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {access_token}",
+                },
+                params={
+                    "instrument_key": underlying_key,
+                    "expiry_date": expiry_iso,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+
+            payload = resp.json()
+            contracts = payload.get("data", [])
+            if isinstance(contracts, dict):
+                # Defensive fallback in case API wraps list in a nested field.
+                nested_lists = [v for v in contracts.values() if isinstance(v, list)]
+                contracts = nested_lists[0] if nested_lists else []
+
+            if not isinstance(contracts, list) or not contracts:
+                status_msg.set("[ERROR] No expired option contracts returned by Upstox API")
+                return
+
+            target_type = str(instr_type).strip().upper()
+            target_strike = float(strike_num)
+            matched = None
+            for row in contracts:
+                row_type = str(row.get("instrument_type", "")).strip().upper()
+                row_strike = pd.to_numeric(row.get("strike_price"), errors="coerce")
+                if row_type == target_type and pd.notna(row_strike) and float(row_strike) == target_strike:
+                    matched = row
+                    break
+
+            if not matched:
+                status_msg.set(
+                    f"[ERROR] Upstox API returned {len(contracts)} contracts, but no {target_type} {int(target_strike)} match"
+                )
+                return
+
+            expired_key = str(matched.get("instrument_key", "")).strip()
+            if not expired_key:
+                status_msg.set("[ERROR] Upstox API match missing instrument_key")
+                return
+
+            parts = expired_key.split("|")
+            base_key = f"{parts[0]}|{parts[1]}" if len(parts) >= 2 else expired_key
+
+            selected_instrument_key.set(base_key)
+            selected_strike.set(str(int(target_strike)))
+            try:
+                ui.update_text("instrument", value=base_key, session=session)
+            except Exception as e:
+                logger.warning("Could not update input instrument via ui.update_text for expired key: %s", e)
+
+            status_msg.set(f"[OK] Expired contract matched from Upstox API; selected base key: {base_key}")
+        except requests.exceptions.HTTPError as e:
+            err_body = ""
+            try:
+                err_body = (e.response.text or "")[:240]
+            except Exception:
+                err_body = ""
+            status_msg.set(f"[ERROR] Upstox API error while fetching expired contract: {e}. {err_body}")
+        except Exception as e:
+            status_msg.set(f"[ERROR] Failed to resolve expired instrument: {e}")
             traceback.print_exc()
 
     @reactive.effect
@@ -2010,7 +2177,10 @@ def define_server(input, output, session):
             typed = (input.instrument() or "").strip()
         except Exception:
             typed = ""
-        if typed and typed != str(key).strip():
+        key_s = str(key).strip()
+        # Keep selected key when typed input is the corresponding expired key
+        # e.g. base "NSE_FO|57021" and typed "NSE_FO|57021|23-12-2025".
+        if typed and typed != key_s and not typed.startswith(f"{key_s}|"):
             selected_instrument_key.set(None)
 
     # ===== Data Fetching & Processing =====

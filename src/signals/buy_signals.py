@@ -132,6 +132,21 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                           &  (df['volume_profile'].shift(-2) == 0))
     # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
     no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
+    # Reactivation override: if price reclaims VWAP after two closes below VWAP,
+    # disable the gap-up-red hard block and let other gates decide trading.
+    trading_day = df.loc[first_idx, 'Date'].date()
+    trading_day_mask = (df['Date'].dt.date == trading_day)
+    vwap_reclaim_after_two_below = (
+        (df['Close'].shift(2) < df['VWAP']) &
+        (df['Close'].shift(1) < df['VWAP']) &
+        (df['Close'] > df['VWAP']) &
+        (df['BBU_Angle_Degree'] < 120) & 
+        trading_day_mask
+    )
+    reactivate_after_vwap_cross = bool(vwap_reclaim_after_two_below.any())
+    effective_no_trade_gap_up_red_at_all = (
+        no_trade_gap_up_red_at_all and (not reactivate_after_vwap_cross)
+    )
 
     allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow | green_continuation)  # scalar
 
@@ -160,7 +175,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     base_allowed_trade_series = (
       ((allow_basic & t0_window) | trade_if_vwap_back_series)
       & (~(no_trade_if_vwap_fail))
-      & (~no_trade_gap_up_red_at_all)
+      & (~effective_no_trade_gap_up_red_at_all)
     )
 
    # apply market-time window (same as you had)
@@ -418,9 +433,19 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                    & ((df['EMA_Trend'] == 'Uptrend') | (df['EMA_Trend'] == 'Flat')) & (df['volume_profile'] == 1) & (df['volume_profile'].shift(1) == 1)
                                    & (df['BBM_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'].shift(1) < 160))
                                   )
-
     
-    df['Super_Low_Buy_Signal'] = condition_super_low_buy & trade_allowed
+    bbu_gt_ema9_any_past20 = (
+    (df['BBU'] < df['EMA9'])
+    .shift(1)
+    .rolling(20, min_periods=1)
+    .max()
+    .astype(bool))
+
+    condition_ema_bbu_crossover = ((df['VWAP'] > df['EMA9']) &  (df['EMA9'] > df['BBM']) 
+                                    & (df['EMA9'].shift(1) <= df['BBM'].shift(1)) & bbu_gt_ema9_any_past20)
+
+    df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover
+    df['Super_Low_Buy_Signal'] = condition_super_low_buy  & trade_allowed
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2 & trade_allowed
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series
     df['RSI_pct_buy'] = RSI_pct_buy_signal & trade_allowed
