@@ -434,6 +434,7 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                    & (df['BBM_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'].shift(1) < 160))
                                   )
     
+    # code for lowest point buys 
     bbu_gt_ema9_any_past20 = (
     (df['BBU'] < df['EMA9'])
     .shift(1)
@@ -441,8 +442,22 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     .max()
     .astype(bool))
 
-    condition_ema_bbu_crossover = ((df['VWAP'] > df['EMA9']) &  (df['EMA9'] > df['BBM']) 
+    running_low = df["Low"].cummin()
+    is_new_running_low = df["Low"].eq(running_low)
+    row_idx = np.arange(len(df))
+    last_low_idx = pd.Series(np.where(is_new_running_low, row_idx, np.nan), index=df.index).ffill()
+    ema_cross_up_bbm = (df["EMA9"].shift(1) > df["BBM"].shift(1)) & (df["EMA9"].shift(2) <= df["BBM"].shift(2)) & (df["EMA9"] > df["BBM"]) 
+    after_low = pd.Series(row_idx, index=df.index) > last_low_idx
+
+    condition_ema_bbu_crossover = (((df['VWAP'] > df['EMA9']) &  (df['EMA9'] > df['BBM']) 
                                     & (df['EMA9'].shift(1) <= df['BBM'].shift(1)) & bbu_gt_ema9_any_past20)
+                                    | (((df['VWAP'].shift(2) > df['EMA9'].shift(2)) | (df['VWAP'].shift(3) > df['EMA9'].shift(3)))
+                                      & ((df['VWAP'].shift(1) < df['EMA9'].shift(1)) | (df['VWAP'].shift(2) < df['EMA9'].shift(2)))
+                                      & (df['VWAP'] < df['EMA9']) & (df['BBU_Angle_Degree'] < 140) & (df['EMA_Angle_Degree'] < 140)
+                                      & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()))
+                                    | (ema_cross_up_bbm & after_low & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
+                                        & (df['EMA_Angle_Degree'] < 230))
+                                    )
 
     df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover
     df['Super_Low_Buy_Signal'] = condition_super_low_buy  & trade_allowed
@@ -450,6 +465,6 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series
     df['RSI_pct_buy'] = RSI_pct_buy_signal & trade_allowed
     df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series  #& trade_allowed
-    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time >= pd.to_datetime('09:22:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series 
+    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time >= pd.to_datetime('09:23:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series 
 
     return df

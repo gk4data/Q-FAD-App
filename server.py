@@ -137,6 +137,114 @@ def define_server(input, output, session):
                 return ex.strftime("%Y-%m-%d")
         return None
 
+    def _resolve_historical_option_contract(
+        access_token: str,
+        symbol: str,
+        trade_day: _date,
+        strike: int,
+        instrument_type: str,
+        exchange: str = "NSE",
+    ) -> tuple[str | None, str | None, str]:
+        """Resolve a contract for historical backtests.
+
+        Uses the current instrument master when it contains a valid expiry for the trade day,
+        otherwise falls back to Upstox expired-contract lookup around the expected weekly expiry.
+        """
+        max_master_expiry_gap_days = 9
+        expiry_dates: list[_date] = []
+        try:
+            expiries_raw = instrument_manager.get_expiry_dates(symbol, instrument_type=instrument_type)
+            expiry_dates = sorted(
+                [
+                    _dt.strptime(str(e), "%Y-%m-%d").date()
+                    for e in (expiries_raw or [])
+                    if e is not None and str(e).strip() != ""
+                ]
+            )
+        except Exception:
+            expiry_dates = []
+
+        expiry_iso = _next_available_expiry_for_day(trade_day, expiry_dates)
+        if expiry_iso:
+            try:
+                expiry_dt = _dt.strptime(expiry_iso, "%Y-%m-%d").date()
+                expiry_gap_days = (expiry_dt - trade_day).days
+            except Exception:
+                expiry_gap_days = None
+
+            if expiry_gap_days is not None and 0 <= expiry_gap_days <= max_master_expiry_gap_days:
+                try:
+                    base_inst = instrument_manager.get_instrument_key(symbol, expiry_iso, strike, instrument_type)
+                    if base_inst:
+                        return str(base_inst), expiry_iso, "instrument_master"
+                except Exception:
+                    pass
+            else:
+                logger.info(
+                    "Skipping instrument-master expiry %s for %s %s on %s because gap=%s days",
+                    expiry_iso,
+                    symbol,
+                    instrument_type,
+                    trade_day.strftime("%Y-%m-%d"),
+                    expiry_gap_days,
+                )
+
+        underlying_key = _resolve_underlying_index_key(symbol, exchange=exchange)
+        if not underlying_key:
+            return None, None, "missing underlying index key"
+
+        weekly_anchor = _next_tuesday_for(trade_day)
+        candidate_dates = []
+        for offset in [0, -1, 1, -2, 2, -3, 3]:
+            candidate = weekly_anchor + timedelta(days=offset)
+            if candidate >= trade_day:
+                candidate_dates.append(candidate)
+
+        seen: set[str] = set()
+        for candidate in candidate_dates:
+            expiry_iso = candidate.strftime("%Y-%m-%d")
+            if expiry_iso in seen:
+                continue
+            seen.add(expiry_iso)
+            try:
+                resp = requests.get(
+                    "https://api.upstox.com/v2/expired-instruments/option/contract",
+                    headers={
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {access_token}",
+                    },
+                    params={
+                        "instrument_key": underlying_key,
+                        "expiry_date": expiry_iso,
+                    },
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+                contracts = payload.get("data", [])
+                if isinstance(contracts, dict):
+                    nested_lists = [v for v in contracts.values() if isinstance(v, list)]
+                    contracts = nested_lists[0] if nested_lists else []
+                if not isinstance(contracts, list) or not contracts:
+                    continue
+
+                target_type = str(instrument_type).strip().upper()
+                target_strike = float(strike)
+                for row in contracts:
+                    row_type = str(row.get("instrument_type", "")).strip().upper()
+                    row_strike = pd.to_numeric(row.get("strike_price"), errors="coerce")
+                    if row_type == target_type and pd.notna(row_strike) and float(row_strike) == target_strike:
+                        inst_key = str(row.get("instrument_key", "")).strip()
+                        if not inst_key:
+                            continue
+                        parts = inst_key.split("|")
+                        base_inst = f"{parts[0]}|{parts[1]}" if len(parts) >= 2 else inst_key
+                        return base_inst, expiry_iso, "expired_contract_api"
+            except Exception:
+                continue
+
+        return None, None, "no matching historical contract"
+
     def _resolve_option_base_key(symbol: str, strike: int, instrument_type: str) -> str | None:
         """Resolve a base option key by symbol/strike/type without relying on specific expiry."""
         df = None
@@ -267,6 +375,52 @@ def define_server(input, output, session):
             pass
 
         return None
+
+    def _fetch_option_history_for_backtest(
+        access_token: str,
+        instrument_key: str,
+        date_iso: str,
+        expiry_iso: str | None = None,
+        interval: str = "1minute",
+        preferred_mode: str | None = None,
+    ) -> tuple[pd.DataFrame, str]:
+        """Fetch a single option trading day, trying active-history first and expired-history as fallback."""
+        attempts: list[str] = []
+
+        modes_to_try: list[str] = []
+        if preferred_mode == "expired":
+            modes_to_try = ["expired"]
+        elif preferred_mode == "date_range":
+            modes_to_try = ["date_range", "expired"]
+        else:
+            modes_to_try = ["date_range", "expired"]
+
+        for mode in modes_to_try:
+            if mode == "expired" and not expiry_iso:
+                continue
+            try:
+                df = fetch_intraday_data(
+                    instrument_key,
+                    access_token,
+                    interval=interval,
+                    mode=mode,
+                    start=date_iso,
+                    end=date_iso,
+                    expiry_for_expired=expiry_iso,
+                )
+                if df is not None and not df.empty:
+                    return df, mode
+                attempts.append(f"{mode} returned no rows")
+            except Exception as exc:
+                attempts.append(f"{mode} failed: {exc}")
+
+        logger.warning(
+            "Historical option fetch returned no rows for %s on %s. Attempts: %s",
+            instrument_key,
+            date_iso,
+            "; ".join(attempts) if attempts else "none",
+        )
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Volume"]), "unavailable"
 
     def _load_historical_orders_df():
         if not os.path.exists(historical_file_path):
@@ -2407,19 +2561,6 @@ def define_server(input, output, session):
         rows = []
         processed_days = 0
         skipped_days = 0
-        expiry_dates = []
-        try:
-            expiries_raw = instrument_manager.get_expiry_dates("NIFTY", instrument_type="CE")
-            expiry_dates = sorted(
-                [
-                    _dt.strptime(str(e), "%Y-%m-%d").date()
-                    for e in (expiries_raw or [])
-                    if e is not None and str(e).strip() != ""
-                ]
-            )
-        except Exception:
-            expiry_dates = []
-
         cursor = start_dt
         while cursor <= end_dt:
             day_iso = cursor.strftime("%Y-%m-%d")
@@ -2440,11 +2581,6 @@ def define_server(input, output, session):
             if ce_strike == pe_strike:
                 ce_strike += 100
 
-            expiry_iso = _next_available_expiry_for_day(cursor, expiry_dates)
-            if not expiry_iso:
-                skipped_days += 1
-                cursor += timedelta(days=1)
-                continue
             strike_plan = [("CE", ce_strike), ("PE", pe_strike)]
 
             for side, strike in strike_plan:
@@ -2452,6 +2588,7 @@ def define_server(input, output, session):
                     "Date": day_iso,
                     "Side": side,
                     "Instrument Key": "",
+                    "Status": "pending",
                     "Trades": 0,
                     "Return (%)": 0.0,
                     "Buy & Hold Return (%)": 0.0,
@@ -2463,22 +2600,31 @@ def define_server(input, output, session):
                     "Expectancy per Trade (%)": 0.0,
                 }
                 try:
-                    base_inst = instrument_manager.get_instrument_key("NIFTY", expiry_iso, strike, side)
+                    base_inst, expiry_iso, resolution_source = _resolve_historical_option_contract(
+                        access_token,
+                        "NIFTY",
+                        cursor,
+                        strike,
+                        side,
+                        exchange="NSE",
+                    )
                     if not base_inst:
+                        metrics_row["Status"] = resolution_source
                         rows.append(metrics_row)
                         continue
                     metrics_row["Instrument Key"] = str(base_inst)
+                    metrics_row["Status"] = f"resolved via {resolution_source}"
 
-                    day_df = fetch_intraday_data(
-                        base_inst,
+                    day_df, fetch_mode_used = _fetch_option_history_for_backtest(
                         access_token,
+                        base_inst,
+                        day_iso,
+                        expiry_iso=expiry_iso,
                         interval="1minute",
-                        mode="expired",
-                        start=day_iso,
-                        end=day_iso,
-                        expiry_for_expired=expiry_iso,
+                        preferred_mode=("expired" if resolution_source == "expired_contract_api" else "date_range"),
                     )
                     if day_df is None or day_df.empty:
+                        metrics_row["Status"] = "no candle data"
                         rows.append(metrics_row)
                         continue
 
@@ -2488,10 +2634,11 @@ def define_server(input, output, session):
                         access_token,
                         day_iso,
                         interval="1minute",
-                        mode="expired",
+                        mode=fetch_mode_used,
                         expiry_for_expired=expiry_iso,
                         previous_rows=60,
                     )
+                    metrics_row["Status"] = f"fetched via {fetch_mode_used}"
 
                     df_calc = calculate_indicators(raw_df)
                     df_calc = detect_regimes_relaxed(df_calc)
@@ -2499,6 +2646,7 @@ def define_server(input, output, session):
                     df_calc = add_long_signal(df_calc)
                     df_day = filter_to_current_day(df_calc, day_iso)
                     if df_day is None or df_day.empty:
+                        metrics_row["Status"] = "empty after indicators"
                         rows.append(metrics_row)
                         continue
 
@@ -2515,8 +2663,19 @@ def define_server(input, output, session):
                         metrics_row["Total Profit (₹)"] = float(summary.get("Total Profit [$]", 0.0) or 0.0)
                         metrics_row["Winning Trades"] = int(summary.get("Winning Trades", 0) or 0)
                         metrics_row["Losing Trades"] = int(summary.get("Losing Trades", 0) or 0)
+                        metrics_row["Status"] = "ok"
+                    elif isinstance(summary, dict):
+                        metrics_row["Status"] = str(summary.get("Message", "no trades"))
                     rows.append(metrics_row)
-                except Exception:
+                except Exception as exc:
+                    metrics_row["Status"] = f"error: {exc}"
+                    logger.exception(
+                        "Historical backtest failed for %s %s %s on %s",
+                        side,
+                        strike,
+                        expiry_iso,
+                        day_iso,
+                    )
                     rows.append(metrics_row)
 
             cursor += timedelta(days=1)
