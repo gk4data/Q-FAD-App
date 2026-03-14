@@ -73,6 +73,12 @@ def instrument_selector_card():
             ui.column(6, ui.input_action_button("apply_instrument", "Apply", class_="btn-success btn-sm")),
             ui.column(6, ui.output_ui("selected_instrument_display"))
         ),
+        ui.input_action_button(
+            "get_expired_instrument",
+            "Get Expired Instrument",
+            class_="btn-secondary btn-sm",
+            style="width:100%; margin-top: 8px;"
+        ),
     )
 
 

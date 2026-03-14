@@ -225,6 +225,20 @@ def plot_signals(df):
             row=1, col=1
         )
 
+    # EMA-BBM Crossover Buy Signal
+    if 'condition_ema_bbu_crossover' in df.columns and df['condition_ema_bbu_crossover'].any():
+        fig.add_trace(
+            go.Scatter(
+                x=x_vals[df['condition_ema_bbu_crossover']],
+                y=df['Low'][df['condition_ema_bbu_crossover']],
+                mode='markers',
+                marker=dict(color='rgb(230, 93, 0)', size=16, symbol='triangle-up'),
+                name="condition_ema_bbu_crossover",
+                hovertemplate='<b>EMA-BBM Crossover Buy</b><br>%{x|%Y-%m-%d %H:%M:%S}<extra></extra>'
+            ),
+            row=1, col=1
+        )
+
     # Bollinger Bands
     if 'BBL' in df.columns:
         fig.add_trace(go.Scatter(x=x_vals, y=df['BBL'], line=dict(color='blue', width=1), name="Lower BB", hovertemplate='<b>Lower BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
