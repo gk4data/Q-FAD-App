@@ -68,7 +68,8 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                     & (df['BBM_Angle_pct'].shift(1) > df['BBM_Angle_pct']) & (df['Low'] <= df['EMA9']) & (df['MFI_pct']*100 < df['RSI_hi'])
                                     & (((((df['Close'] - df['Low']))/df['Close']))*100 > 0.15)
                                     & (((df['EMA9'] > df['BBM']) & ((((df['EMA9'] - df['BBM']))/df['EMA9'])*100 < 2.75)) | (df['EMA9'] < df['BBM'])
-                                       | ((df['EMA9'] > df['BBM']) & ((((df['Close'].shift(1) - df['Close']))/df['Close'].shift(1))*100 > 6))))
+                                       | ((df['EMA9'] > df['BBM']) & ((((df['Close'].shift(1) - df['Close']))/df['Close'].shift(1))*100 > 6)))
+                                    &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05))
 
 
     bbu_angle_and_candle_high_sell = ((df['BBU_Angle_Degree'] >= 181) & ((df['High'].shift(1) > df['BBU'].shift(1)) | (df['High'].shift(2) > df['BBU'].shift(2)))
