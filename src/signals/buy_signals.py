@@ -126,12 +126,22 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     else:
         green_continuation = False
     
-    no_trade_gap_up_red = ((first_close > first_bbu) & (first_open > first_bbu)
+    no_trade_gap_up_red = (((first_close > first_bbu) & (first_open > first_bbu)
                           & (first_volume_profile == 0)  # 1nd candle is red (look ahead)
                           &  (df['volume_profile'].shift(-1) == 0) # 2rd candle is red
-                          &  (df['volume_profile'].shift(-2) == 0))
+                          &  (df['volume_profile'].shift(-2) == 0)))
+
+    no_trade_gap_down_green = ((first_close < first_bbu) & (first_close < first_bbl)
+                          & ((((first_bbl - first_close)/ (first_bbl))*100) > 30)
+                          & (first_volume_profile == 1)  # 1nd candle is red (look ahead)
+                          & (df['volume_profile'].shift(-1) == 0) 
+                          & (df['volume_profile'].shift(-2) == 0)
+                          & ((df['volume_profile'].shift(-3) == 0) | (df['volume_profile'].shift(-4) == 0)))
+    
     # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
     no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
+    no_trade_gap_down_green_at_all = bool(no_trade_gap_down_green.any())
+
     # Reactivation override: if price reclaims VWAP after two closes below VWAP,
     # disable the gap-up-red hard block and let other gates decide trading.
     trading_day = df.loc[first_idx, 'Date'].date()
@@ -143,9 +153,9 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
         (df['BBU_Angle_Degree'] < 120) & 
         trading_day_mask
     )
-    reactivate_after_vwap_cross = bool(vwap_reclaim_after_two_below.any())
+    reactivate_after_vwap_cross = vwap_reclaim_after_two_below.cummax() & trading_day_mask
     effective_no_trade_gap_up_red_at_all = (
-        no_trade_gap_up_red_at_all and (not reactivate_after_vwap_cross)
+        (no_trade_gap_up_red_at_all or no_trade_gap_down_green_at_all) & (~reactivate_after_vwap_cross)
     )
 
     allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow | green_continuation)  # scalar
@@ -462,11 +472,11 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
 
     condition_ema_bbu_crossover = (
                                     ((df['VWAP'] > df['EMA9']) &  (df['EMA9'] > df['BBM']) 
-                                    & (df['EMA9'].shift(1) <= df['BBM'].shift(1)) & bbu_gt_ema9_any_past20)
+                                    & (df['EMA9'].shift(1) <= df['BBM'].shift(1)) & bbu_gt_ema9_any_past20 & allowed_trade_series)
                                     | (((df['VWAP'].shift(2) > df['EMA9'].shift(2)) | (df['VWAP'].shift(3) > df['EMA9'].shift(3)))
                                       & ((df['VWAP'].shift(1) < df['EMA9'].shift(1)) | (df['VWAP'].shift(2) < df['EMA9'].shift(2)))
                                       & (df['VWAP'] < df['EMA9']) & (df['BBU_Angle_Degree'] < 140) & (df['EMA_Angle_Degree'] < 140)
-                                      & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()))
+                                      & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & allowed_trade_series)
                                     | 
                                     first_ema_cross_after_low
                                     )

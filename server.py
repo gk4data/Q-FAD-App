@@ -2653,7 +2653,7 @@ def define_server(input, output, session):
                     trades_df = calculate_manual_pnl(df_day, initial_cash=100000, commission=0.0)
                     summary = get_summary_stats_manual(df_day, trades_df, initial_cash=100000)
 
-                    if isinstance(summary, dict) and "Message" not in summary:
+                    if isinstance(summary, dict):
                         metrics_row["Trades"] = int(summary.get("# Trades", 0) or 0)
                         metrics_row["Expectancy per Trade (%)"] = float(summary.get("Expectancy per Trade [%]", 0.0) or 0.0)
                         metrics_row["Return (%)"] = float(summary.get("Return [%]", 0.0) or 0.0)
@@ -2663,9 +2663,7 @@ def define_server(input, output, session):
                         metrics_row["Total Profit (₹)"] = float(summary.get("Total Profit [$]", 0.0) or 0.0)
                         metrics_row["Winning Trades"] = int(summary.get("Winning Trades", 0) or 0)
                         metrics_row["Losing Trades"] = int(summary.get("Losing Trades", 0) or 0)
-                        metrics_row["Status"] = "ok"
-                    elif isinstance(summary, dict):
-                        metrics_row["Status"] = str(summary.get("Message", "no trades"))
+                        metrics_row["Status"] = str(summary.get("Message", "ok"))
                     rows.append(metrics_row)
                 except Exception as exc:
                     metrics_row["Status"] = f"error: {exc}"
@@ -2713,7 +2711,13 @@ def define_server(input, output, session):
         non_empty_rows = len(out_df.index)
         total_capital = 100000.0 * non_empty_rows if non_empty_rows > 0 else 0.0
         total_return_pct = round((total_profit / total_capital) * 100.0, 2) if total_capital else 0.0
-        bh_series = pd.to_numeric(out_df.get("Buy & Hold Return (%)", 0.0), errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        valid_total_statuses = {"ok", "No trades executed."}
+        valid_total_mask = out_df.get("Status", "").astype(str).isin(valid_total_statuses) if "Status" in out_df.columns else pd.Series(True, index=out_df.index)
+
+        bh_series = pd.to_numeric(
+            out_df.loc[valid_total_mask, "Buy & Hold Return (%)"] if "Buy & Hold Return (%)" in out_df.columns else pd.Series(dtype=float),
+            errors="coerce"
+        ).replace([np.inf, -np.inf], np.nan).dropna()
         total_bh_return_pct = round(float(bh_series.mean()), 2) if not bh_series.empty else 0.0
 
         exp_series = pd.to_numeric(out_df.get("Expectancy per Trade (%)", 0.0), errors="coerce").fillna(0.0)

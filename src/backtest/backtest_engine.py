@@ -130,8 +130,35 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
     """
     Enhanced summary statistics with advanced trading ratios.
     """
+    buy_hold = ((df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1) * 100 if len(df) > 1 else 0
+
     if trades_df.empty:
-        return {"Message": "No trades executed."}
+        return {
+            "Message": "No trades executed.",
+            'Equity Final [$]': round(float(initial_cash), 2),
+            'Return [%]': 0.0,
+            'Buy & Hold Return [%]': round(buy_hold, 2),
+            'CAGR [%]': np.nan,
+            'Win Rate [%]': 0.0,
+            '# Trades': 0,
+            'Profit Factor': 0.0,
+            'Expectancy per Trade [%]': 0.0,
+            'Avg Win [%]': 0.0,
+            'Avg Loss [%]': 0.0,
+            'Payoff Ratio': 0.0,
+            'Sharpe Ratio': 0.0,
+            'Sortino Ratio': 0.0,
+            'Calmar Ratio': 0.0,
+            'Recovery Factor': 0.0,
+            'Gain-to-Pain Ratio': 0.0,
+            'Avg Holding (bars)': 0.0,
+            'Max Drawdown [%]': 0.0,
+            'Best Trade [%]': 0.0,
+            'Worst Trade [%]': 0.0,
+            'Total Profit [$]': 0.0,
+            'Winning Trades': 0,
+            'Losing Trades': 0,
+        }
 
     equity_curve = trades_df['Equity'].astype(float)
     final_equity = equity_curve.iloc[-1]
@@ -145,9 +172,6 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
     running_max = equity_curve.cummax()
     drawdown = (equity_curve - running_max) / running_max * 100
     max_drawdown = abs(drawdown.min())
-
-    # Buy & Hold
-    buy_hold = ((df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1) * 100 if len(df) > 1 else 0
 
     # Advanced metrics
     winning_returns = trades_df.loc[trades_df['Win'] == 1, 'Return %']
