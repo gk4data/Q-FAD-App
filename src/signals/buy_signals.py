@@ -442,21 +442,33 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
     .max()
     .astype(bool))
 
-    running_low = df["Low"].cummin()
+    trading_day = df["Date"].dt.date
+    running_low = df.groupby(trading_day)["Low"].cummin()
     is_new_running_low = df["Low"].eq(running_low)
     row_idx = np.arange(len(df))
-    last_low_idx = pd.Series(np.where(is_new_running_low, row_idx, np.nan), index=df.index).ffill()
+    row_idx_series = pd.Series(row_idx, index=df.index)
+    last_low_idx = row_idx_series.where(is_new_running_low).groupby(trading_day).ffill()
     ema_cross_up_bbm = (df["EMA9"].shift(1) > df["BBM"].shift(1)) & (df["EMA9"].shift(2) <= df["BBM"].shift(2)) & (df["EMA9"] > df["BBM"]) 
-    after_low = pd.Series(row_idx, index=df.index) > last_low_idx
+    after_low = row_idx_series > last_low_idx
+    low_cycle = is_new_running_low.groupby(trading_day).cumsum()
+    ema_cross_after_low_setup = (
+        ema_cross_up_bbm
+        & after_low
+        & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
+        & (df['EMA_Angle_Degree'] < 230)
+        & allowed_trade_series
+    )
+    first_ema_cross_after_low = ema_cross_after_low_setup & ema_cross_after_low_setup.groupby([trading_day, low_cycle]).cumsum().eq(1)
 
-    condition_ema_bbu_crossover = (((df['VWAP'] > df['EMA9']) &  (df['EMA9'] > df['BBM']) 
+    condition_ema_bbu_crossover = (
+                                    ((df['VWAP'] > df['EMA9']) &  (df['EMA9'] > df['BBM']) 
                                     & (df['EMA9'].shift(1) <= df['BBM'].shift(1)) & bbu_gt_ema9_any_past20)
                                     | (((df['VWAP'].shift(2) > df['EMA9'].shift(2)) | (df['VWAP'].shift(3) > df['EMA9'].shift(3)))
                                       & ((df['VWAP'].shift(1) < df['EMA9'].shift(1)) | (df['VWAP'].shift(2) < df['EMA9'].shift(2)))
                                       & (df['VWAP'] < df['EMA9']) & (df['BBU_Angle_Degree'] < 140) & (df['EMA_Angle_Degree'] < 140)
                                       & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()))
-                                    | (ema_cross_up_bbm & after_low & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
-                                        & (df['EMA_Angle_Degree'] < 230))
+                                    | 
+                                    first_ema_cross_after_low
                                     )
 
     df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover
