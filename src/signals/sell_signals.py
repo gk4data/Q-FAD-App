@@ -150,7 +150,11 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                      )
                                     |((df['regime'] == 'sideways') & ((df['EMA_Trend'] == 'Flat') & (df['EMA_Trend'].shift(1) == 'Uptrend')) 
                                       & (df['Open'].shift(1) > df['EMA9'].shift(1)) & (df['Close'] < df['EMA9']) & (df['Close'] < df['BBM'])
-                                      & (df['volume_profile'].shift(1) == 0) & (df['volume_profile']== 0) & (df['EMA9'].shift(1) > df['EMA9'])))
+                                      & (df['volume_profile'].shift(1) == 0) & (df['volume_profile']== 0) & (df['EMA9'].shift(1) > df['EMA9']))
+                                    | ((df['regime'] == 'sideways') & ((df['EMA_Trend'] == 'Flat')) & (df['Trend'] == 'Uptrend')
+                                       & (df['volume_profile'] == 0) & (df['Close'] < df['EMA9']) & (df['Close'] < df['BBM'])
+                                       & ((df['BBM_Angle_Degree'] >= 185) | (df['BBU_Angle_Degree'] >= 185)))
+                                      )
                                     
     
     bottleneck_sell_condition = ((((df['Close'] < df['EMA9']) | (df['Close'] < df['BBM']))  &  volume_profile_red 
@@ -206,5 +210,5 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                         #  | (uptrend_ema_sell_signal)
                          | (test_past_signal)
                           )
-   # df['Sell_Signal'] =  (downtrend_ema_sell_signal | condition_close_all_positions)
+   # df['Sell_Signal'] =  (sideways_regime_bbu_top_sell | condition_close_all_positions)
     return df

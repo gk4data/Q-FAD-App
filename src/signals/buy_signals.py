@@ -479,7 +479,47 @@ def generate_buy_signals(df: pd.DataFrame) -> pd.DataFrame:
                                       & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & allowed_trade_series)
                                     | 
                                     first_ema_cross_after_low
+                                    | 
+                                    ((((df["EMA9"].shift(5) > df["Close"].shift(5)) & (df['EMA9'].shift(5) < df['BBM'].shift(5))) 
+                                     | ((df["EMA9"].shift(4) > df["Close"].shift(4)) & (df['EMA9'].shift(4) < df['BBM'].shift(4)))
+                                     | ((df["EMA9"].shift(3) > df["Close"].shift(3)) & (df['EMA9'].shift(3) < df['BBM'].shift(3))) 
+                                     | ((df["EMA9"].shift(6) > df["Close"].shift(6)) & (df['EMA9'].shift(6) < df['BBM'].shift(6))))
+                                     & ((df["EMA9"].shift(2) < df["Close"].shift(2)) & (df['EMA9'].shift(2) > df['BBM'].shift(2)))
+                                     & ((df["EMA9"].shift(1) < df["Close"].shift(1)) & (df['EMA9'].shift(1) > df['BBM'].shift(1)))
+                                     & ((df["EMA9"] < df["Close"]) & (df['EMA9'] > df['BBM']))
+                                     & ((df["Close"] > df["Close"].shift(2)) | (df["Close"] > df["Close"].shift(1)))
+                                     & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
+                                     #& (df['BBU_Angle_Degree'] < 140) & (df['EMA_Angle_Degree'] < 140)
+                                     )
+                                    | 
+                                    ((((df["EMA9"].shift(5) > df["Close"].shift(5)) & (df['Close'].shift(5) < df['BBM'].shift(5)))
+                                     | ((df["EMA9"].shift(4) > df["Close"].shift(4)) & (df['Close'].shift(4) < df['BBM'].shift(4)))
+                                     | ((df["EMA9"].shift(3) > df["Close"].shift(3)) & (df['Close'].shift(3) < df['BBM'].shift(3))))
+                                    & ((df["EMA9"].shift(2) < df["Close"].shift(2)) & (df['EMA9'].shift(2) > df['BBM'].shift(2)))
+                                     & ((df["EMA9"].shift(1) < df["Close"].shift(1)) & (df['EMA9'].shift(1) > df['BBM'].shift(1)))
+                                     & ((df["EMA9"] < df["Close"]) & (df['EMA9'] > df['BBM']))
+                                     & (df["Close"] > df["Close"].shift(2)) & (df["Close"] > df["Close"].shift(1))
+                                     & (df['BBU_Angle_Degree'] < 120) & (df['EMA_Angle_Degree'] < 120)
+                                     & (df['BBU_Angle_Degree'].shift(1) < 130) & (df['EMA_Angle_Degree'].shift(1) < 130)
+                                     & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend')
+                                     & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
+                                     & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
                                     )
+                                    |
+                                    ((df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
+                                     & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend')
+                                     & (((df["EMA9"].shift(4) > df["Low"].shift(4)) & (df['EMA9'].shift(4) < df['BBM'].shift(4)) 
+                                                    & (df['BBM_Angle_Degree'].shift(4) < 150) & (df['BBM_Angle_Degree'].shift(4) < df['EMA_Angle_Degree'].shift(4)))
+                                        | ((df["EMA9"].shift(3) > df["Low"].shift(3)) & (df['EMA9'].shift(3) < df['BBM'].shift(3)) 
+                                                    & (df['BBM_Angle_Degree'].shift(3) < 150) & (df['BBM_Angle_Degree'].shift(3) < df['EMA_Angle_Degree'].shift(3)))
+                                        | ((df["EMA9"].shift(5) > df["Low"].shift(5)) & (df['EMA9'].shift(5) < df['BBM'].shift(5)) 
+                                                    & (df['BBM_Angle_Degree'].shift(5) < 150) & (df['BBM_Angle_Degree'].shift(5) < df['EMA_Angle_Degree'].shift(5))))
+                                     & (df["EMA9"] < df["Close"]) & (df['EMA9'] > df['BBM'])
+                                     & ((df["Close"] > df["Close"].shift(2)) | (df["Close"] > df["Close"].shift(1)))
+                                     & (df['BBU_Angle_Degree'] < 140) & (df['EMA_Angle_Degree'] < 140)
+                                     & (df['BBU_Angle_Degree'].shift(1) < 140) & (df['EMA_Angle_Degree'].shift(1) < 140)
+                                     & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
+                                     ))
 
     df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover
     df['Super_Low_Buy_Signal'] = condition_super_low_buy  & trade_allowed
