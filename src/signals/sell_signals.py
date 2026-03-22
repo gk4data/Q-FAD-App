@@ -38,12 +38,18 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
     ## close positions at 3.29 
     condition_close_all_positions = (df['Date'].dt.time == pd.to_datetime('15:29:00').time())
                              
-    condition_exit_at_top_2 =  ((df['Trend'] == 'Uptrend')  #& ((df['Volume'].shift(1) > df['Volume'].shift(2)))
+    condition_exit_at_top_2 =  (((df['Trend'] == 'Uptrend')  #& ((df['Volume'].shift(1) > df['Volume'].shift(2)))
                                 & volume_profile_red & (df['BBU_Angle_Degree'] < 120)
                                 & (((((df['Open']) - df['Close']) / df['Open'])*100 > 1.60) | ((df['Open'] < df['BBU']) & (df['Close'] < df['BBU'])))
                                 & (((((df['High'].shift(1) - df['Close'].shift(1))/ df['High'].shift(1))*100) >= 3.5) 
                                 | ((((df['BBU'].shift(1) - df['Close'].shift(1))/ df['BBU'].shift(1))*100) <= 1.2))
                                 & ((((df['High'].shift(1) - df['BBU'].shift(1))/ df['High'].shift(1))*100) >= 4.5))
+                                |
+                                ((df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'] > 190) & (df['EMA_Angle_Degree'].shift(1)  > 190)
+                                & (df['High'].rolling(window=3).mean() > df['High'])
+                                & (df['Low'].shift(1) > df['Low'])  & (df['Low'].shift(2) > df['Low'])
+                                & ((df['Close'] < df['BBM']) & (df['Close'] < df['EMA9'])))
+                                )
 
     
     ## ema & bbm angle sell condition
@@ -207,8 +213,8 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                          | (sideways_regime_bbu_top_sell)
                          | (bottleneck_sell_condition)
                          | (downtrend_bbl_sell_signal)
-                        #  | (uptrend_ema_sell_signal)
+                         #| (uptrend_ema_sell_signal)
                          | (test_past_signal)
-                          )
-   # df['Sell_Signal'] =  (sideways_regime_bbu_top_sell | condition_close_all_positions)
+                          ) & (df['condition_ema_bbu_crossover'] != True)
+   #df['Sell_Signal'] =  (condition_exit_at_top_2 | condition_close_all_positions)
     return df
