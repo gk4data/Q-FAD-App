@@ -232,7 +232,7 @@ def plot_signals(df):
                 x=x_vals[df['condition_ema_bbu_crossover']],
                 y=df['Low'][df['condition_ema_bbu_crossover']],
                 mode='markers',
-                marker=dict(color='rgb(230, 93, 0)', size=16, symbol='triangle-up'),
+                marker=dict(color='rgb(136, 0, 184)', size=16, symbol='triangle-up'),
                 name="condition_ema_bbu_crossover",
                 hovertemplate='<b>EMA-BBM Crossover Buy</b><br>%{x|%Y-%m-%d %H:%M:%S}<extra></extra>'
             ),
