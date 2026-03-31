@@ -257,7 +257,13 @@ def create_main_ui():
                 ui.navset_tab(
                     ui.nav_panel(ui.HTML("<i class='bi bi-graph-up'></i> Chart"), ui.div(output_widget("price_plot"), class_="chart-container")),
                     ui.nav_panel(ui.HTML("<i class='bi bi-bar-chart'></i> Backtest"), ui.div(ui.output_ui("backtest_summary"), style="padding:16px;")),
-                    ui.nav_panel(ui.HTML("<i class='bi bi-receipt'></i> Trades"), ui.div(ui.output_data_frame("trades_table"), style="padding:16px;")),
+                    ui.nav_panel(
+                        ui.HTML("<i class='bi bi-receipt'></i> Trades"),
+                        ui.div(
+                            ui.div(ui.output_data_frame("trades_table"), style="padding:16px;"),
+                            ui.div(output_widget("trades_backtest_plot"), style="padding:0 16px 16px 16px;"),
+                        ),
+                    ),
                     ui.nav_panel(ui.HTML("<i class='bi bi-activity'></i> Backend Data"), ui.div(ui.download_button("download_csv", ui.HTML("<i class='bi bi-download'></i> Download Signals CSV"), class_="btn-success"), ui.output_data_frame("signals_table"), style="padding:16px;")),
                     ui.nav_panel(
                         ui.HTML("<i class='bi bi-clock'></i> Historical Backtest"),

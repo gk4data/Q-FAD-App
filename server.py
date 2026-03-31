@@ -31,6 +31,7 @@ from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
 from src.data.live_data_feed import LiveDataRecorder
 from src.viz.plot_signals import plot_signals
+from src.viz.plot_backtest import plot_backtest_overview
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
 from ui import create_auth_ui, create_main_ui
 
@@ -2877,6 +2878,19 @@ def define_server(input, output, session):
                 display_df['Exit Time'] = display_df['Exit Time'].astype(str)
 
         return render.DataTable(display_df, width="100%", height="600px")
+
+    @output
+    @render_plotly
+    def trades_backtest_plot():
+        trades_df = trades_data.get()
+        cash = float(initial_cash_used.get() or 100000)
+        try:
+            return plot_backtest_overview(trades_df, initial_cash=cash)
+        except Exception as e:
+            logger.exception("Trades backtest plot render error: %s", e)
+            fig = go.Figure()
+            fig.update_layout(title=f"Backtest plot error: {e}", height=520, template="plotly_white")
+            return fig
 
     @output
     @render.data_frame
