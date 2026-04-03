@@ -1458,7 +1458,7 @@ def define_server(input, output, session):
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
-            df = add_long_signal(df)
+            df = add_long_signal(df, expiry_date=input.select_expiry())
             df = filter_to_current_day(df, target_date_str)
             df_data.set(df.copy())
             try:
@@ -1613,7 +1613,7 @@ def define_server(input, output, session):
                 df = classify_trend_by_angles(df)
                 has_915 = (df["Date"].dt.time == _dt.strptime("09:15:00", "%H:%M:%S").time()).any()
                 if has_915:
-                    df = add_long_signal(df)
+                    df = add_long_signal(df, expiry_date=input.select_expiry())
                 else:
                     logger.warning("WebSocket CSV: skipping signals (no 09:15 candle found)")
                 df = filter_to_current_day(df, target_date_str)
@@ -2475,7 +2475,7 @@ def define_server(input, output, session):
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
-            df = add_long_signal(df)
+            df = add_long_signal(df, expiry_date=input.select_expiry())
             
             # Filter back to current day only
             status_msg.set(f"[INFO] Filtering to current day data only...")
@@ -2644,7 +2644,7 @@ def define_server(input, output, session):
                     df_calc = calculate_indicators(raw_df)
                     df_calc = detect_regimes_relaxed(df_calc)
                     df_calc = classify_trend_by_angles(df_calc)
-                    df_calc = add_long_signal(df_calc)
+                    df_calc = add_long_signal(df_calc, expiry_date=expiry_iso)
                     df_day = filter_to_current_day(df_calc, day_iso)
                     if df_day is None or df_day.empty:
                         metrics_row["Status"] = "empty after indicators"
