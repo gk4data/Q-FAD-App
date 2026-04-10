@@ -138,6 +138,7 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
             'Equity Final [$]': round(float(initial_cash), 2),
             'Return [%]': 0.0,
             'Buy & Hold Return [%]': round(buy_hold, 2),
+            'Equity Peak [%]': 0.0,
             'CAGR [%]': np.nan,
             'Win Rate [%]': 0.0,
             '# Trades': 0,
@@ -162,6 +163,8 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
 
     equity_curve = trades_df['Equity'].astype(float)
     final_equity = equity_curve.iloc[-1]
+    peak_equity = equity_curve.max()
+    peak_equity_pct = (peak_equity / initial_cash - 1) * 100
     total_return = (final_equity / initial_cash - 1) * 100
     total_trades = len(trades_df)
     wins = trades_df['Win'].sum()
@@ -215,6 +218,7 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
         'Equity Final [$]': round(final_equity, 2),
         'Return [%]': round(total_return, 2),
         'Buy & Hold Return [%]': round(buy_hold, 2),
+        'Equity Peak [%]': round(peak_equity_pct, 2),
         'CAGR [%]': round(cagr, 2),
         'Win Rate [%]': round(win_rate, 2),
         '# Trades': int(total_trades),

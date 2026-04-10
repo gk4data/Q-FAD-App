@@ -2657,6 +2657,7 @@ def define_server(input, output, session):
                     if isinstance(summary, dict):
                         metrics_row["Trades"] = int(summary.get("# Trades", 0) or 0)
                         metrics_row["Expectancy per Trade (%)"] = float(summary.get("Expectancy per Trade [%]", 0.0) or 0.0)
+                        metrics_row["Equity Peak (%)"] = float(summary.get("Equity Peak [%]", 0.0) or 0.0)
                         metrics_row["Return (%)"] = float(summary.get("Return [%]", 0.0) or 0.0)
                         metrics_row["Buy & Hold Return (%)"] = float(summary.get("Buy & Hold Return [%]", 0.0) or 0.0)
                         metrics_row["Best Trade (%)"] = float(summary.get("Best Trade [%]", 0.0) or 0.0)
