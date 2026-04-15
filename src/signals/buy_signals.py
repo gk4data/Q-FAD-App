@@ -549,7 +549,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     row_idx = np.arange(len(df))
     row_idx_series = pd.Series(row_idx, index=df.index)
     last_low_idx = row_idx_series.where(is_new_running_low).groupby(trading_day).ffill()
-    ema_cross_up_bbm = (df["EMA9"].shift(1) > df["BBM"].shift(1)) & (df["EMA9"].shift(2) <= df["BBM"].shift(2)) & (df["EMA9"] > df["BBM"]) 
+    ema_cross_up_bbm = (df["EMA9"] > df["BBM"]) & (df["EMA9"].shift(1) > df["BBM"].shift(1)) & (df["EMA9"].shift(2) <= df["BBM"].shift(2)) 
     after_low = row_idx_series > last_low_idx
     low_cycle = is_new_running_low.groupby(trading_day).cumsum()
     regime_filter = (df['regime'] == 'sideways')
@@ -651,7 +651,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     # #  & ((df['Trend'] == 'Uptrend') & (df['EMA_Trend'] == 'Uptrend')) & (df['EMA9'] > df['BBM']) & (df['BBU_Angle_Degree'] >= 100)
                                     # #  & (df['Close'].shift(1) > df['BBM'].shift(1)) & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM']) & (df['volume_profile'] == 1)
                                     # #  & (df['EMA_Angle_Degree'] < 150) & (df['BBM_Angle_Degree'] < 150) & (df['BBU_Angle_Degree'] < 150))
-                                    # # |
+                                    |
                                     (((df['Close'].shift(3) > df['BBM'].shift(3)) & (df['Close'].shift(3) > df['EMA9'].shift(3)) & (df['volume_profile'].shift(3) == 0))
                                      & ((df['Close'].shift(4) > df['BBM'].shift(4)) & (df['Close'].shift(4) > df['EMA9'].shift(4)) & (df['volume_profile'].shift(4) == 0))
                                      & ((df['Low'].shift(2) < df['BBM'].shift(2)) & (df['Close'].shift(2) < df['EMA9'].shift(2)) & (df['volume_profile'].shift(2) == 0))
