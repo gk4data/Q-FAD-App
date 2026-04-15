@@ -38,18 +38,28 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
     ## close positions at 3.29 
     condition_close_all_positions = (df['Date'].dt.time == pd.to_datetime('15:29:00').time())
                              
-    condition_exit_at_top_2 =  (((df['Trend'] == 'Uptrend')  #& ((df['Volume'].shift(1) > df['Volume'].shift(2)))
+    condition_exit_at_top_2 = (
+                              ((df['Trend'] == 'Uptrend')  #& ((df['Volume'].shift(1) > df['Volume'].shift(2)))
                                 & volume_profile_red & (df['BBU_Angle_Degree'] < 120)
-                                & (((((df['Open']) - df['Close']) / df['Open'])*100 > 1.60) | ((df['Open'] < df['BBU']) & (df['Close'] < df['BBU'])))
+                                & (((((df['Open']) - df['Close']) / df['Open'])*100 > 1.60) | ((df['Open'] < df['BBU']) & (df['Close'] < df['BBU'])) | ((df['Open'] > df['BBU']) & (df['Close'] > df['BBU'])))
                                 & (((((df['High'].shift(1) - df['Close'].shift(1))/ df['High'].shift(1))*100) >= 3.5) 
                                 | ((((df['BBU'].shift(1) - df['Close'].shift(1))/ df['BBU'].shift(1))*100) <= 1.2))
-                                & ((((df['High'].shift(1) - df['BBU'].shift(1))/ df['High'].shift(1))*100) >= 4.5))
+                                & ((((df['High'].shift(1) - df['BBU'].shift(1))/ df['High'].shift(1))*100) >= 4.5)
+                                #& (df['High'].shift(1) > df['Open'])
+                                )|
+                                ((df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'] < 120) & (df['BBU_Angle_Degree']  < 120)
+                                  & ((df['BBL_Angle_Degree']  < 130) | (df['BBL_Angle_Degree'].shift(1)  < 130))
+                                  & (df['BBU_Angle_Degree'] > df['BBU_Angle_Degree'].shift(1)) & (df['volume_profile'] == 0)
+                                 #  & ((df['Open'].shift(1) > df['BBU'].shift(1)) & (df['volume_profile'].shift(1) == 1))
+                                 #  & (((df['Open'] > df['BBU']) & (df['volume_profile'] == 0)) | ((df['High'] > df['BBU']) & (df['volume_profile'] == 0)))
+                                  & (((((df['Open']) - df['Close']) / df['Open'])*100 > 1.60))
+                                )
                                 |
                                 ((df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'] > 190) & (df['EMA_Angle_Degree'].shift(1)  > 190)
                                 & (df['High'].rolling(window=3).mean() > df['High'])
                                 & (df['Low'].shift(1) > df['Low'])  & (df['Low'].shift(2) > df['Low'])
                                 & ((df['Close'] < df['BBM']) & (df['Close'] < df['EMA9'])))
-                                )
+                              )
     
     ## ema & bbm angle sell condition
     condtion_ema_bbm_sell = (bbm_angle_sell & ema_bbm_minor_diff & close_less_ema_1  & condition_close_sell  & volume_profile_red 
@@ -77,9 +87,11 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                     & (df['MFI_pct'].shift(2) >= df['MFI_pct'].shift(1)) & (df['MFI_pct'].shift(1) > df['MFI_pct']) & volume_profile_red
                                     & (df['BBM_Angle_pct'].shift(1) > df['BBM_Angle_pct']) & (df['Low'] <= df['EMA9']) & (df['MFI_pct']*100 < df['RSI_hi'])
                                     & (((((df['Close'] - df['Low']))/df['Close']))*100 > 0.15)
-                                    & (((df['EMA9'] > df['BBM']) & ((((df['EMA9'] - df['BBM']))/df['EMA9'])*100 < 2.75)) | (df['EMA9'] < df['BBM'])
-                                       | ((df['EMA9'] > df['BBM']) & ((((df['Close'].shift(1) - df['Close']))/df['Close'].shift(1))*100 > 6)))
-                                    &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05))
+                                    & (((df['EMA9'] > df['BBM']) & ((((df['EMA9'] - df['BBM']))/df['EMA9'])*100 < 2.75) & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50)) 
+                                       | (df['EMA9'] < df['BBM'])
+                                       | ((df['EMA9'] > df['BBM']) & ((((df['Close'].shift(1) - df['Close']))/df['Close'].shift(1))*100 > 6) & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50)))
+                                    &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05)
+                                    & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50))
 
 
     bbu_angle_and_candle_high_sell = ((df['BBU_Angle_Degree'] >= 181) & ((df['High'].shift(1) > df['BBU'].shift(1)) | (df['High'].shift(2) > df['BBU'].shift(2)))
@@ -220,14 +232,16 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                    | (df['Close'].shift(1) > df['EMA9'].shift(1)) | (df['Close'].shift(4) > df['EMA9'].shift(4)))   
                                 & (df['Close'] < df['EMA9']) & (df['Close'] < df['BBM']) & (df['BBL'] >= df['Low']))
     
-    test_past_signal = ((((df['New_Uptrend_Buy_Signal'].shift(1) == True) | (df['New_Uptrend_Buy_Signal'].shift(2) == True)) 
+    test_past_signal = (
+                        (((df['New_Uptrend_Buy_Signal'].shift(1) == True) | (df['New_Uptrend_Buy_Signal'].shift(2) == True)) 
                         & volume_profile_red & (((df['Open'] - df['Close'])/df['Open'])*100 >= 1.20) & (df['Close'] < df['BBM'])
                         & ((df['BBU_Angle_Degree'] >= 188) | ((df['BBL_Angle_Degree'] >= 180) & (df['regime'] == 'sideways'))))
                         | (((df['New_Uptrend_Buy_Signal'].shift(2) == True) | (df['New_Uptrend_Buy_Signal'].shift(3) == True) | (df['New_Uptrend_Buy_Signal'].shift(4) == True))
                            & ((df['BBU_Angle_Degree'] >= 188) | ((df['BBL_Angle_Degree'] >= 180) & (df['regime'] == 'sideways'))) 
                            & (df['Close'] < df['EMA9']) & ((df['Close'] < df['BBM']))# | ((df['Close'] < df['Close'].shift(1)) & (df['Close'].shift(1) < df['Close'].shift(2))))  
                            & (((df['Open'] - df['Close'])/df['Open'])*100 >= 1.20) & volume_profile_red)
-                        |(((df['Downtrend_Reverse_Buy_Signal'].shift(1) == True) | (df['Downtrend_Reverse_Buy_Signal'].shift(2) == True))
+                        |
+                        (((df['Downtrend_Reverse_Buy_Signal'].shift(1) == True) | (df['Downtrend_Reverse_Buy_Signal'].shift(2) == True))
                          & (df['EMA9'] < df['BBM']) & ((df['EMA9'].shift(1) < df['BBM'].shift(1)) | (df['EMA9'].shift(2) < df['BBM'].shift(2)))
                             & volume_profile_red & (df['BBM_Angle_Degree'] > 180) & (df['EMA_Angle_Degree'] > 180)))
 
