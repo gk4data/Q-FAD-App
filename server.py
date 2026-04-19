@@ -31,6 +31,7 @@ from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
 from src.data.live_data_feed import LiveDataRecorder
 from src.viz.plot_signals import plot_signals
+from src.viz.plot_backtest import plot_backtest_overview
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
 from ui import create_auth_ui, create_main_ui
 
@@ -1457,7 +1458,7 @@ def define_server(input, output, session):
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
-            df = add_long_signal(df)
+            df = add_long_signal(df, expiry_date=input.select_expiry())
             df = filter_to_current_day(df, target_date_str)
             df_data.set(df.copy())
             try:
@@ -1612,7 +1613,7 @@ def define_server(input, output, session):
                 df = classify_trend_by_angles(df)
                 has_915 = (df["Date"].dt.time == _dt.strptime("09:15:00", "%H:%M:%S").time()).any()
                 if has_915:
-                    df = add_long_signal(df)
+                    df = add_long_signal(df, expiry_date=input.select_expiry())
                 else:
                     logger.warning("WebSocket CSV: skipping signals (no 09:15 candle found)")
                 df = filter_to_current_day(df, target_date_str)
@@ -2474,7 +2475,7 @@ def define_server(input, output, session):
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
-            df = add_long_signal(df)
+            df = add_long_signal(df, expiry_date=input.select_expiry())
             
             # Filter back to current day only
             status_msg.set(f"[INFO] Filtering to current day data only...")
@@ -2643,7 +2644,7 @@ def define_server(input, output, session):
                     df_calc = calculate_indicators(raw_df)
                     df_calc = detect_regimes_relaxed(df_calc)
                     df_calc = classify_trend_by_angles(df_calc)
-                    df_calc = add_long_signal(df_calc)
+                    df_calc = add_long_signal(df_calc, expiry_date=expiry_iso)
                     df_day = filter_to_current_day(df_calc, day_iso)
                     if df_day is None or df_day.empty:
                         metrics_row["Status"] = "empty after indicators"
@@ -2656,6 +2657,7 @@ def define_server(input, output, session):
                     if isinstance(summary, dict):
                         metrics_row["Trades"] = int(summary.get("# Trades", 0) or 0)
                         metrics_row["Expectancy per Trade (%)"] = float(summary.get("Expectancy per Trade [%]", 0.0) or 0.0)
+                        metrics_row["Equity Peak (%)"] = float(summary.get("Equity Peak [%]", 0.0) or 0.0)
                         metrics_row["Return (%)"] = float(summary.get("Return [%]", 0.0) or 0.0)
                         metrics_row["Buy & Hold Return (%)"] = float(summary.get("Buy & Hold Return [%]", 0.0) or 0.0)
                         metrics_row["Best Trade (%)"] = float(summary.get("Best Trade [%]", 0.0) or 0.0)
@@ -2877,6 +2879,19 @@ def define_server(input, output, session):
                 display_df['Exit Time'] = display_df['Exit Time'].astype(str)
 
         return render.DataTable(display_df, width="100%", height="600px")
+
+    @output
+    @render_plotly
+    def trades_backtest_plot():
+        trades_df = trades_data.get()
+        cash = float(initial_cash_used.get() or 100000)
+        try:
+            return plot_backtest_overview(trades_df, initial_cash=cash)
+        except Exception as e:
+            logger.exception("Trades backtest plot render error: %s", e)
+            fig = go.Figure()
+            fig.update_layout(title=f"Backtest plot error: {e}", height=520, template="plotly_white")
+            return fig
 
     @output
     @render.data_frame
