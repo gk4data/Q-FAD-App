@@ -548,7 +548,7 @@ def define_server(input, output, session):
         cached = client.get_cached_token()
         if cached:
             token.set(cached)
-            status_msg.set("[OK] Using cached token (valid for 24h)")
+            status_msg.set("[OK] Using cached token (valid until Upstox 3:30 AM IST expiry)")
             _refresh_funds()
         else:
             status_msg.set("[INFO] No valid token. Click 'Show Login URL' to authenticate.")
@@ -661,11 +661,13 @@ def define_server(input, output, session):
 
         rows_count = len(work)
         days_count = work["Date"].astype(str).nunique() if "Date" in work.columns else 0
-        total_invested = float(rows_count * 100000.0)
+        base_capital = 100000.0
+        total_invested = float(rows_count * base_capital)
         total_return_amount = float(work["Total Profit (₹)"].sum())
         total_pnl_pct = (total_return_amount / total_invested) * 100.0 if total_invested > 0 else 0.0
+        total_return_on_capital_pct = (total_return_amount / base_capital) * 100.0 if base_capital > 0 else 0.0
 
-        comp_capital = 100000.0
+        comp_capital = base_capital
         if "Side" in work.columns:
             side_order = {"CE": 0, "PE": 1}
             work["_side"] = work["Side"].astype(str).str.upper().map(side_order).fillna(9)
@@ -674,8 +676,8 @@ def define_server(input, output, session):
             work = work.sort_values(["Date"])
         for r in work["Return (%)"].tolist():
             comp_capital *= (1.0 + (float(r) / 100.0))
-        comp_final_return = comp_capital - 100000.0
-        comp_final_pct = ((comp_capital / 100000.0) - 1.0) * 100.0
+        comp_final_return = comp_capital - base_capital
+        comp_final_pct = ((comp_capital / base_capital) - 1.0) * 100.0
 
         def _fmt_inr(v):
             return f"₹{v:,.2f}"
@@ -703,10 +705,11 @@ def define_server(input, output, session):
             ("Rows (CE+PE)", str(rows_count)),
             ("Total Invested", _fmt_inr(total_invested)),
             ("Total Return Amount", _fmt_inr(total_return_amount)),
-            ("Total PnL %", f"{total_pnl_pct:.2f}%"),
+            ("Average Session PnL %", f"{total_pnl_pct:.2f}%"),
+            ("Return on Base Capital", f"{total_return_on_capital_pct:.2f}%"),
         ]
         comp_rows = [
-            ("Initial Investment (Day 1)", _fmt_inr(100000.0)),
+            ("Initial Investment (Day 1)", _fmt_inr(base_capital)),
             ("Compounding Final Capital", _fmt_inr(comp_capital)),
             ("Compounding Final Return", _fmt_inr(comp_final_return)),
             ("Compounding Final Return %", f"{comp_final_pct:.2f}%"),
