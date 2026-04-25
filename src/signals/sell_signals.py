@@ -128,7 +128,7 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 ((df['BBU_Angle_Degree'].shift(1) >= df['BBU_Angle_Degree'].shift(2)) & ((df['RSI_pct'].shift(2)*100 > df['RSI_hi']))         
                                  & ((df['RSI_pct'].shift(2)*100 > df['RSI'])) & ((df['RSI_pct'].shift(1)*100 < df['RSI']))
                                  & (df['RSI_pct']*100 < df['RSI_lo']))
-                            ) & volume_profile_red & no_sell_time & (df['Low'] < df['BBM'])
+                            ) & volume_profile_red & no_sell_time & (df['Low'] < df['BBM']) & (((df['BBM'] - df['Low'])/ df['BBM'])*100 >= 0.25)
     
     new_ema_sell_condition = ((df['Close'] <= df['EMA9'])  &  volume_profile_red 
                               & (df['BBU_Angle_Degree'].shift(1) < df['BBU_Angle_Degree']) & (df['BBL_Angle_Degree'].shift(1) > df['BBL_Angle_Degree'])
@@ -174,12 +174,6 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 & (df['volume_profile'].shift(2) == 0) & (df['volume_profile'].shift(1) == 0) & (df['volume_profile'] == 0)
                                 & (df['BBM'] > df['Close']) & (df['EMA9'] > df['Close']) & (df['EMA_Angle_Degree'] >= df['EMA_Angle_Degree'].shift(1))
                                 & (df['EMA_Angle_Degree'] >= 190) & (df['BBU_Angle_Degree'] >= 180))
-                              # |((df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend') & (df['volume_profile'] == 0)
-                              #   & (df['EMA_Angle_Degree'] >= df['EMA_Angle_Degree'].shift(1)) & (df['EMA9'] > df['Close']) 
-                              #   & (df['EMA_Angle_Degree'] >= 190) & (df['EMA_Angle_Degree'].shift(1) >= 180) & (df['BBU_Angle_Degree'] >= 180) 
-                              #   & (df['BBU_Angle_Degree'].shift(1) >= 170) & (df['BBM_Angle_Degree'] >= df['BBM_Angle_Degree'].shift(1))
-                              #   & (df['Low'].rolling(window=3).mean() > df['Low']) #& (df['Low'] < df['BBM']) 
-                              # )
                               )
                         
     ema_downside_sell = ((df['regime'] == 'sideways') & (df['volume_profile'] == 0)

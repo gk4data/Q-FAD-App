@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+
 import requests
 from dotenv import load_dotenv
 from .token_manager import TokenManager
@@ -50,11 +52,16 @@ class UpstoxClient:
         response_data = r.json()
         self.access_token = response_data.get("access_token")
         
-        # Cache the token (expires_in is typically 86400 seconds = 24h)
+        # Cache the token using Upstox's documented expiry behavior.
         if self.use_cache and self.access_token:
-            expires_in = response_data.get("expires_in", 86400)
-            self.token_manager.save_token(self.access_token, expires_in)
-        
+            expires_at = response_data.get("expires_at")
+            if expires_at:
+                try:
+                    expires_at = datetime.fromtimestamp(int(expires_at) / 1000)
+                except (TypeError, ValueError):
+                    expires_at = None
+            self.token_manager.save_token(self.access_token, expires_at=expires_at)
+
         return self.access_token
 
     def get_funds_and_margin(self, access_token: str, segment: str | None = None):
