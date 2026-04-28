@@ -1828,6 +1828,7 @@ def define_server(input, output, session):
             bool(last_row.get('RSI_Range_Buy_Signal', False)) or
             bool(last_row.get('Super_Low_Buy_Signal', False)) or 
             bool(last_row.get('Super_Low_Buy_Signal_2', False)) or 
+            bool(last_row.get('condition_supreme_low_crossover', False)) or
             bool(last_row.get('New_Uptrend_Buy_Signal', False)) or
             bool(last_row.get('Downtrend_Reverse_Buy_Signal', False)) or 
             bool(last_row.get('RSI_pct_buy', False))

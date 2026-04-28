@@ -183,6 +183,20 @@ def plot_signals(df):
             row=1, col=1
         )
 
+    # Supreme Low Crossover Buy Signal
+    if 'condition_supreme_low_crossover' in df.columns and df['condition_supreme_low_crossover'].any():
+        fig.add_trace(
+            go.Scatter(
+                x=x_vals[df['condition_supreme_low_crossover']],
+                y=df['Low'][df['condition_supreme_low_crossover']],
+                mode='markers',
+                marker=dict(color='rgb(250,50,160)', size=16, symbol='triangle-up'),
+                name="condition_supreme_low_crossover",
+                hovertemplate='<b>Supreme Low Crossover</b><br>%{x|%Y-%m-%d %H:%M:%S}<extra></extra>'
+            ),
+            row=1, col=1
+        )
+
     # RSI pct buy
     if 'RSI_pct_buy' in df.columns and df['RSI_pct_buy'].any():
         fig.add_trace(
