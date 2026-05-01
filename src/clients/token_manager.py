@@ -1,7 +1,11 @@
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+
+UPSTOX_TZ = ZoneInfo("Asia/Kolkata")
 
 
 class TokenManager:
@@ -20,7 +24,20 @@ class TokenManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.token_file = self.cache_dir / "access_token.json"
 
-    def save_token(self, access_token, expires_in_seconds=86400):
+    def _compute_upstox_expiry(self, issued_at=None):
+        """
+        Compute Upstox token expiry as 3:30 AM Asia/Kolkata the following day.
+        """
+        issued_at = issued_at or datetime.now(UPSTOX_TZ)
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=UPSTOX_TZ)
+        else:
+            issued_at = issued_at.astimezone(UPSTOX_TZ)
+
+        next_day = issued_at.date() + timedelta(days=1)
+        return datetime.combine(next_day, time(hour=3, minute=30), tzinfo=UPSTOX_TZ)
+
+    def save_token(self, access_token, expires_in_seconds=86400, expires_at=None):
         """
         Save token to disk with expiration time.
         
@@ -29,17 +46,32 @@ class TokenManager:
         access_token : str
             The access token from OAuth
         expires_in_seconds : int
-            Token lifetime in seconds (default: 24h = 86400s)
+            Token lifetime in seconds. Retained for backward compatibility.
+        expires_at : datetime | str | None
+            Explicit token expiry. If omitted, Upstox's documented rule is used:
+            3:30 AM Asia/Kolkata on the following day.
         """
-        expiry = datetime.now() + timedelta(seconds=expires_in_seconds)
+        issued_at = datetime.now(UPSTOX_TZ)
+        if expires_at:
+            if isinstance(expires_at, str):
+                expiry = datetime.fromisoformat(expires_at)
+            else:
+                expiry = expires_at
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=UPSTOX_TZ)
+            else:
+                expiry = expiry.astimezone(UPSTOX_TZ)
+        else:
+            expiry = self._compute_upstox_expiry(issued_at)
+
         data = {
             "access_token": access_token,
-            "created_at": datetime.now().isoformat(),
+            "created_at": issued_at.isoformat(),
             "expires_at": expiry.isoformat()
         }
         with open(self.token_file, "w") as f:
             json.dump(data, f, indent=2)
-        print(f"[OK] Token saved. Expires at: {expiry}")
+        print(f"[OK] Token saved. Expires at (Asia/Kolkata): {expiry}")
 
     def load_token(self):
         """
@@ -58,7 +90,8 @@ class TokenManager:
                 data = json.load(f)
             
             expiry = datetime.fromisoformat(data["expires_at"])
-            if datetime.now() < expiry:
+            now = datetime.now(expiry.tzinfo) if expiry.tzinfo else datetime.now()
+            if now < expiry:
                 print(f"[OK] Using cached token. Expires at: {expiry}")
                 return data["access_token"]
             else:

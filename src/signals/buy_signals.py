@@ -250,11 +250,38 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     total_wick_pct = upper_wick_pct + lower_wick_pct
     very_small_green_candle = ((df['volume_profile'] == 1) & ((((df['Close'] - df['Open']) / df['Close'])*100) <= 0.20))
     very_small_red_candle = ((df['volume_profile'] == 0) & ((((df['Open'] - df['Close']) / df['Open'])*100) <= 0.20))
+    ## avoid sideways
+    bb_width = (df['BBU'] - df['BBL']) / df['BBM'].replace(0, np.nan)
+    trading_day = df['Date'].dt.date
+    intraday_candle_number = df.groupby(trading_day).cumcount() + 1
+    bb_width_calc_time = df['Date'].dt.time >= pd.to_datetime('09:35:00').time()
+    bb_width_reference = bb_width.where(bb_width_calc_time).groupby(trading_day).transform(
+        lambda s: s.expanding(min_periods=1).mean()
+    )
+    downtrend_cabdles = ((df['Trend'] == 'Downtrend') & (df['EMA_Trend'] == 'Downtrend'))
+    funnel_openings = ((df['BBU'] > df['BBU'].shift(1)) & (df['BBL'] < df['BBL'].shift(1)) 
+                      & (df['EMA_Angle_Degree'] <= 160) & (df['BBU_Angle_Degree'] <= 160))
+    not_while_three_candles_above_ema = ~((((df['Close'].shift(1) > df['EMA9'].shift(1)) & (df['Close'].shift(2) > df['EMA9'].shift(2)) 
+                                          & (df['Close'] > df['EMA9']))
+                                          | ((df['Close'].shift(1) > df['Close'].shift(2)) & (df['Close'].shift(2) > df['Close'].shift(3)) 
+                                          & (df['Close'] > df['Close'].shift(1))))
+                                          & (df['EMA_Angle_Degree'] <= 170) & (df['BBU_Angle_Degree'] <= 175)
+                                          & (df['EMA_Angle_Degree'].shift(1) <= 170) & (df['BBU_Angle_Degree'].shift(1) <= 180)
+                                          )
+    low_bb_width_candle = (
+        bb_width_calc_time
+        & (intraday_candle_number > 30)
+        & bb_width_reference.notna()
+        & (bb_width < (bb_width_reference * 0.75))
+        & ~(downtrend_cabdles) & ~(funnel_openings) & not_while_three_candles_above_ema
+    )
 
     unstable_candle = ((range_pct >= 7) | (total_wick_pct >= 0.80) 
                        | ((upper_wick_pct >= 0.65) & (body_pct_range <= 0.35))
                        | ((upper_wick_pct >= 0.75) | (lower_wick_pct >= 0.75))
-                       | (very_small_green_candle) | (very_small_red_candle))
+                       | (very_small_green_candle) | (very_small_red_candle)
+                       | low_bb_width_candle
+                       )
     
     df['unstable_candle'] = unstable_candle
     
@@ -380,7 +407,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                             | (((df['Trend'] == 'Downtrend') | (df['Trend'] == 'Flat')) & ((df['BBU_Angle_Degree'].shift(1) < 240))
                              & ((df['Close'] < df['High'].shift(2)) & (df['Close'] > df['Close'].shift(1)) &
                              (((df['High'].shift(1) > df['High']) & (((df['High'].shift(1) - df['High']) / df['High'].shift(1) * 100) < 0.20)) 
-                            | ((df['High'] > df['High'].shift(1)) & ((((df['High'] - df['High'].shift(1)) / df['High']) * 100) > 0.25))))))
+                            | ((df['High'] > df['High'].shift(1)) & ((((df['High'] - df['High'].shift(1)) / df['High']) * 100) > 0.25)))))) & (df['EMA_Angle_Degree'] <= 188)
                     
 
     condition_super_low_buy = ((prev_close_less_ema_bbm   &  round_ema_more_than_bbm  & volume_profile_green & not_extreme_bbu &  condtion_high_low_bbu)) & trend_cond_super_low
@@ -506,7 +533,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                    & ((df['EMA_Trend'] == 'Uptrend') | (df['EMA_Trend'] == 'Flat')) & (df['volume_profile'] == 1) & (df['volume_profile'].shift(1) == 1)
                                    & (df['BBM_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'].shift(1) < 160))
                                   )
-    
+                                    
     # code for lowest point buys 
     bbu_gt_ema9_any_past20 = (
     (df['BBU'] < df['EMA9'])
@@ -525,6 +552,12 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         (df.iloc[c1]['Close'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Close'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
         & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9'])
         & ((((df.iloc[c1]['VWAP']) - (df.iloc[c2]['Low'])) / (df.iloc[c1]['VWAP'])) * 100 >= 45)
+        & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & ((df.iloc[c3]['volume_profile'] == 0) | (df.iloc[c4]['volume_profile'] == 0))
+        ) | (
+        (df.iloc[c1]['Low'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
+        & (df.iloc[c1]['Open'] > df.iloc[c1]['BBU']) & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9']) 
+        & ((((df.iloc[c1]['High']) - (df.iloc[c1]['Low'])) / (df.iloc[c1]['High'])) * 100 >= 33)
+        & ((((df.iloc[c1]['Open']) - (df.iloc[c1]['BBU'])) / (df.iloc[c1]['Open'])) * 100 >= 25)
         & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & ((df.iloc[c3]['volume_profile'] == 0) | (df.iloc[c4]['volume_profile'] == 0)))
           
     trading_day = df["Date"].dt.date
@@ -561,7 +594,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     trend_filter = (df['Trend'] == 'Flat')
     ema_trend_filter = (df['EMA_Trend'] == 'Flat')
     trend_skipping = (regime_filter & trend_filter & ema_trend_filter)
-    ema_cross_after_low_setup = (ema_cross_up_bbm & after_low & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) 
+    ema_cross_after_low_setup = (ema_cross_up_bbm & after_low & (df['Date'].dt.time >= pd.to_datetime('09:16:00').time()) 
         & (df['BBU_Angle_Degree'] >= 100) & (df['BBU_Angle_Degree'] <= 170) & (df['EMA_Angle_Degree'] < 170) & (df['BBU_Angle_Degree'].shift(1) < 250) 
         & (df['BBU_Angle_Degree'].shift(2) < 250) & ~(trend_skipping) & ~(no_trade_on_expiry_after_13))
     first_ema_cross_after_low = ema_cross_after_low_setup & ema_cross_after_low_setup.groupby([trading_day, low_cycle]).cumsum().eq(1)
@@ -591,6 +624,22 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df["High"] > df["High"].shift(1)))
     
     df['drop_down_signal_for_cond_ema_cross'] = drop_down_signal_for_cond_ema_cross
+
+    mfi_exit =  (((df['MFI_pct'].shift(2)*100 > df['RSI_hi'].shift(2)) | (df['MFI_pct'].shift(1)*100 >df['RSI_hi'].shift(1))) 
+                & (df['MFI_pct'].shift(2) >= df['MFI_pct'].shift(1)) & (df['MFI_pct'].shift(1) > df['MFI_pct']) & (df['volume_profile'] == 0)
+                & (df['BBM_Angle_pct'].shift(1) > df['BBM_Angle_pct']) & (df['Low'] <= df['EMA9']) & (df['MFI_pct']*100 < df['RSI_hi'])
+                & (((((df['Close'] - df['Low']))/df['Close']))*100 > 0.15)
+                & (((df['EMA9'] > df['BBM']) & ((((df['EMA9'] - df['BBM']))/df['EMA9'])*100 < 2.75) & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50)) 
+                   | (df['EMA9'] < df['BBM'])
+                   | ((df['EMA9'] > df['BBM']) & ((((df['Close'].shift(1) - df['Close']))/df['Close'].shift(1))*100 > 6) & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50)))
+                &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05)
+                & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50))
+    
+    mfi_exit_happened_recently = ((mfi_exit.shift(2, fill_value=False)| mfi_exit.shift(3, fill_value=False))
+                                    & (df['High'] > df['BBU']) & (df['Close'].shift(1) < df['Close']) & (df['volume_profile'].shift(1) == 1)
+                                    & (df['EMA9'] > df['BBM']) & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 160) 
+                                    & (df['EMA_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'].shift(1) < 180)
+                                )     
     
     condition_ema_bbu_crossover = ( 
                                     ((df['EMA9'] > df['BBM']) & (df['BBU_Angle_Degree'] >= 100) ## ema crossing at BBU at opening or major trend change with vwap crossing ema9
@@ -602,9 +651,11 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     | 
                                     ema_recovery_after_bbu_setup ## after EMA moves above BBU, allow the next 7 candles when EMA is above BBM or price closes above BBU
                                     |
-                                    first_ema_cross_after_low ## buy at every low
+                                    (first_ema_cross_after_low & (~unstable_candle)) ## buy at every low
                                     | ### this need to be tested how its working 
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
+                                    |
+                                    mfi_exit_happened_recently
                                     |
                                     # ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm 
                                     # need to fix the sideways market condition for this setup as it can give false signal in sideways market with low angle of ema and bbm
@@ -732,9 +783,30 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                       & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df['EMA_Angle_Degree'].shift(1) < 180) & (df['EMA_Angle_Degree'] < 150)
                                       & (df["BBU"] < df["High"]) & (df['BBU_Angle_Degree'] < 170) & (df['BBU_Angle_Degree'].shift(1) < 200)
                                       & (df['EMA9'] > df['BBM'])
-                                    ) 
+                                    )                                    
     ) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
 
+     ## supreme low signal condition with heavy dropdown and then curvy upside
+    condition_supreme_low_crossover = (((df['BBU_Angle_Degree'].shift(1).rolling(window=7).mean() > 235) 
+                                     & (df['BBL_Angle_Degree'].shift(1).rolling(window=3).mean() < 155)
+                                     & (df['EMA_Angle_Degree'].shift(1).rolling(window=3).mean() < 155)
+                                     & (df['EMA_Angle_Degree'] < 150)
+                                     & (df['BBM_Angle_Degree'].shift(1) > df['BBM_Angle_Degree'])
+                                     & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
+                                     & (df['High'].shift(1) > df['EMA9'].shift(1)) & (df['High'].shift(1) > df['BBM'].shift(1))                                     
+                                    )
+                                    | ((df['BBU_Angle_Degree'].shift(1).rolling(window=7).mean() > 200) 
+                                     & (df['BBL_Angle_Degree'].shift(1).rolling(window=3).mean() < 150)
+                                     & (df['EMA_Angle_Degree'].shift(1).rolling(window=3).mean() < 180)
+                                     & (df['EMA_Angle_Degree'] < 150)
+                                     & (df['BBM_Angle_Degree'].shift(1) > df['BBM_Angle_Degree'])
+                                     & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
+                                     & (df['High'].shift(1) > df['EMA9'].shift(1)) & (df['High'].shift(1) > df['BBM'].shift(1))
+                                     & ((df['BBM'].shift(6) > df['EMA9'].shift(6)) | (df['BBM'].shift(5) > df['EMA9'].shift(5)))
+                                     )
+                                     ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
+    
+    df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
     df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover &  (df['Date'].dt.time >= pd.to_datetime('09:25:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
     df['Super_Low_Buy_Signal'] = condition_super_low_buy  & trade_allowed & (~unstable_candle)
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2 & trade_allowed & (~unstable_candle)
