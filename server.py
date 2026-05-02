@@ -657,11 +657,14 @@ def define_server(input, output, session):
             return ui.tags.span("[INFO] No backtest rows available for summary", class_="oh-status-text")
 
         work["Return (%)"] = pd.to_numeric(work.get("Return (%)", 0.0), errors="coerce").fillna(0.0)
-        work["Total Profit (₹)"] = pd.to_numeric(work.get("Total Profit (₹)", 0.0), errors="coerce").fillna(0.0)
+        base_capital = 100000.0
+        if "Total Profit (₹)" in work.columns:
+            work["Total Profit (₹)"] = pd.to_numeric(work["Total Profit (₹)"], errors="coerce").fillna(0.0)
+        else:
+            work["Total Profit (₹)"] = (work["Return (%)"] / 100.0) * base_capital
 
         rows_count = len(work)
         days_count = work["Date"].astype(str).nunique() if "Date" in work.columns else 0
-        base_capital = 100000.0
         total_invested = float(rows_count * base_capital)
         total_return_amount = float(work["Total Profit (₹)"].sum())
         total_pnl_pct = (total_return_amount / total_invested) * 100.0 if total_invested > 0 else 0.0
@@ -2593,13 +2596,14 @@ def define_server(input, output, session):
                     "Date": day_iso,
                     "Side": side,
                     "Instrument Key": "",
-                    "Status": "pending",
                     "Trades": 0,
                     "Return (%)": 0.0,
                     "Buy & Hold Return (%)": 0.0,
+                    "Win Rate (%)": 0.0,
+                    "Max Drawdown (%)": 0.0,
+                    "Profit Factor": 0.0,
                     "Best Trade (%)": 0.0,
                     "Worst Trade (%)": 0.0,
-                    "Total Profit (₹)": 0.0,
                     "Winning Trades": 0,
                     "Losing Trades": 0,
                     "Expectancy per Trade (%)": 0.0,
@@ -2614,11 +2618,9 @@ def define_server(input, output, session):
                         exchange="NSE",
                     )
                     if not base_inst:
-                        metrics_row["Status"] = resolution_source
                         rows.append(metrics_row)
                         continue
                     metrics_row["Instrument Key"] = str(base_inst)
-                    metrics_row["Status"] = f"resolved via {resolution_source}"
 
                     day_df, fetch_mode_used = _fetch_option_history_for_backtest(
                         access_token,
@@ -2629,7 +2631,6 @@ def define_server(input, output, session):
                         preferred_mode=("expired" if resolution_source == "expired_contract_api" else "date_range"),
                     )
                     if day_df is None or day_df.empty:
-                        metrics_row["Status"] = "no candle data"
                         rows.append(metrics_row)
                         continue
 
@@ -2643,7 +2644,6 @@ def define_server(input, output, session):
                         expiry_for_expired=expiry_iso,
                         previous_rows=60,
                     )
-                    metrics_row["Status"] = f"fetched via {fetch_mode_used}"
 
                     df_calc = calculate_indicators(raw_df)
                     df_calc = detect_regimes_relaxed(df_calc)
@@ -2651,7 +2651,6 @@ def define_server(input, output, session):
                     df_calc = add_long_signal(df_calc, expiry_date=expiry_iso)
                     df_day = filter_to_current_day(df_calc, day_iso)
                     if df_day is None or df_day.empty:
-                        metrics_row["Status"] = "empty after indicators"
                         rows.append(metrics_row)
                         continue
 
@@ -2661,18 +2660,17 @@ def define_server(input, output, session):
                     if isinstance(summary, dict):
                         metrics_row["Trades"] = int(summary.get("# Trades", 0) or 0)
                         metrics_row["Expectancy per Trade (%)"] = float(summary.get("Expectancy per Trade [%]", 0.0) or 0.0)
-                        metrics_row["Equity Peak (%)"] = float(summary.get("Equity Peak [%]", 0.0) or 0.0)
                         metrics_row["Return (%)"] = float(summary.get("Return [%]", 0.0) or 0.0)
                         metrics_row["Buy & Hold Return (%)"] = float(summary.get("Buy & Hold Return [%]", 0.0) or 0.0)
+                        metrics_row["Win Rate (%)"] = float(summary.get("Win Rate [%]", 0.0) or 0.0)
+                        metrics_row["Max Drawdown (%)"] = float(summary.get("Max Drawdown [%]", 0.0) or 0.0)
+                        metrics_row["Profit Factor"] = float(summary.get("Profit Factor", 0.0) or 0.0)
                         metrics_row["Best Trade (%)"] = float(summary.get("Best Trade [%]", 0.0) or 0.0)
                         metrics_row["Worst Trade (%)"] = float(summary.get("Worst Trade [%]", 0.0) or 0.0)
-                        metrics_row["Total Profit (₹)"] = float(summary.get("Total Profit [$]", 0.0) or 0.0)
                         metrics_row["Winning Trades"] = int(summary.get("Winning Trades", 0) or 0)
                         metrics_row["Losing Trades"] = int(summary.get("Losing Trades", 0) or 0)
-                        metrics_row["Status"] = str(summary.get("Message", "ok"))
                     rows.append(metrics_row)
-                except Exception as exc:
-                    metrics_row["Status"] = f"error: {exc}"
+                except Exception:
                     logger.exception(
                         "Historical backtest failed for %s %s %s on %s",
                         side,
@@ -2694,9 +2692,11 @@ def define_server(input, output, session):
             "Expectancy per Trade (%)",
             "Return (%)",
             "Buy & Hold Return (%)",
+            "Win Rate (%)",
+            "Max Drawdown (%)",
+            "Profit Factor",
             "Best Trade (%)",
             "Worst Trade (%)",
-            "Total Profit (₹)",
         ]:
             if c in out_df.columns:
                 out_df[c] = pd.to_numeric(out_df[c], errors="coerce").round(2)
@@ -2710,21 +2710,42 @@ def define_server(input, output, session):
 
         # Add total row at bottom for high-level summary
         total_trades = int(pd.to_numeric(out_df.get("Trades", 0), errors="coerce").fillna(0).sum())
-        total_profit = float(pd.to_numeric(out_df.get("Total Profit (₹)", 0.0), errors="coerce").fillna(0.0).sum())
         total_win = int(pd.to_numeric(out_df.get("Winning Trades", 0), errors="coerce").fillna(0).sum())
         total_loss = int(pd.to_numeric(out_df.get("Losing Trades", 0), errors="coerce").fillna(0).sum())
 
-        non_empty_rows = len(out_df.index)
-        total_capital = 100000.0 * non_empty_rows if non_empty_rows > 0 else 0.0
-        total_return_pct = round((total_profit / total_capital) * 100.0, 2) if total_capital else 0.0
-        valid_total_statuses = {"ok", "No trades executed."}
-        valid_total_mask = out_df.get("Status", "").astype(str).isin(valid_total_statuses) if "Status" in out_df.columns else pd.Series(True, index=out_df.index)
+        valid_total_mask = pd.Series(True, index=out_df.index)
 
         bh_series = pd.to_numeric(
             out_df.loc[valid_total_mask, "Buy & Hold Return (%)"] if "Buy & Hold Return (%)" in out_df.columns else pd.Series(dtype=float),
             errors="coerce"
         ).replace([np.inf, -np.inf], np.nan).dropna()
         total_bh_return_pct = round(float(bh_series.mean()), 2) if not bh_series.empty else 0.0
+
+        return_series = pd.to_numeric(
+            out_df.loc[valid_total_mask, "Return (%)"] if "Return (%)" in out_df.columns else pd.Series(dtype=float),
+            errors="coerce"
+        ).replace([np.inf, -np.inf], np.nan).dropna()
+        total_return_pct = round(float(return_series.mean()), 2) if not return_series.empty else 0.0
+
+        win_rate_series = pd.to_numeric(
+            out_df.loc[valid_total_mask, "Win Rate (%)"] if "Win Rate (%)" in out_df.columns else pd.Series(dtype=float),
+            errors="coerce"
+        ).replace([np.inf, -np.inf], np.nan).dropna()
+        total_win_rate = round(float((total_win / total_trades) * 100.0), 2) if total_trades > 0 else (
+            round(float(win_rate_series.mean()), 2) if not win_rate_series.empty else 0.0
+        )
+
+        dd_series = pd.to_numeric(
+            out_df.loc[valid_total_mask, "Max Drawdown (%)"] if "Max Drawdown (%)" in out_df.columns else pd.Series(dtype=float),
+            errors="coerce"
+        ).replace([np.inf, -np.inf], np.nan).dropna()
+        total_max_drawdown = round(float(dd_series.mean()), 2) if not dd_series.empty else 0.0
+
+        pf_series = pd.to_numeric(
+            out_df.loc[valid_total_mask, "Profit Factor"] if "Profit Factor" in out_df.columns else pd.Series(dtype=float),
+            errors="coerce"
+        ).replace([np.inf, -np.inf], np.nan).dropna()
+        total_profit_factor = round(float(pf_series.mean()), 2) if not pf_series.empty else 0.0
 
         exp_series = pd.to_numeric(out_df.get("Expectancy per Trade (%)", 0.0), errors="coerce").fillna(0.0)
         trades_series = pd.to_numeric(out_df.get("Trades", 0), errors="coerce").fillna(0.0)
@@ -2735,7 +2756,9 @@ def define_server(input, output, session):
         total_row["Trades"] = total_trades
         total_row["Return (%)"] = total_return_pct
         total_row["Buy & Hold Return (%)"] = total_bh_return_pct
-        total_row["Total Profit (₹)"] = round(total_profit, 2)
+        total_row["Win Rate (%)"] = total_win_rate
+        total_row["Max Drawdown (%)"] = total_max_drawdown
+        total_row["Profit Factor"] = total_profit_factor
         total_row["Winning Trades"] = total_win
         total_row["Losing Trades"] = total_loss
         total_row["Expectancy per Trade (%)"] = total_expectancy
@@ -2749,9 +2772,11 @@ def define_server(input, output, session):
             "Trades",
             "Return (%)",
             "Buy & Hold Return (%)",
+            "Win Rate (%)",
+            "Max Drawdown (%)",
+            "Profit Factor",
             "Best Trade (%)",
             "Worst Trade (%)",
-            "Total Profit (₹)",
             "Winning Trades",
             "Losing Trades",
             "Expectancy per Trade (%)",
@@ -3049,11 +3074,26 @@ def define_server(input, output, session):
             styles.append({"cols": ["Side"], "rows": side_s.eq("CE").tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
             styles.append({"cols": ["Side"], "rows": side_s.eq("PE").tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
 
-        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Total Profit (₹)", "Expectancy per Trade (%)"]:
+        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Expectancy per Trade (%)"]:
             if col in df.columns:
                 s = pd.to_numeric(df[col], errors="coerce")
                 styles.append({"cols": [col], "rows": s.gt(0).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
                 styles.append({"cols": [col], "rows": s.lt(0).fillna(False).tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
+
+        if "Win Rate (%)" in df.columns:
+            s = pd.to_numeric(df["Win Rate (%)"], errors="coerce")
+            styles.append({"cols": ["Win Rate (%)"], "rows": s.ge(50).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
+            styles.append({"cols": ["Win Rate (%)"], "rows": s.lt(50).fillna(False).tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
+
+        if "Max Drawdown (%)" in df.columns:
+            s = pd.to_numeric(df["Max Drawdown (%)"], errors="coerce")
+            styles.append({"cols": ["Max Drawdown (%)"], "rows": s.le(10).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
+            styles.append({"cols": ["Max Drawdown (%)"], "rows": s.gt(10).fillna(False).tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
+
+        if "Profit Factor" in df.columns:
+            s = pd.to_numeric(df["Profit Factor"], errors="coerce")
+            styles.append({"cols": ["Profit Factor"], "rows": s.ge(1).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
+            styles.append({"cols": ["Profit Factor"], "rows": s.lt(1).fillna(False).tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
 
         return render.DataTable(df, width="100%", height="calc(100vh - 320px)", styles=styles)
 
