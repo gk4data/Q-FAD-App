@@ -783,7 +783,26 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                       & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df['EMA_Angle_Degree'].shift(1) < 180) & (df['EMA_Angle_Degree'] < 150)
                                       & (df["BBU"] < df["High"]) & (df['BBU_Angle_Degree'] < 170) & (df['BBU_Angle_Degree'].shift(1) < 200)
                                       & (df['EMA9'] > df['BBM'])
-                                    )                                    
+                                    )
+                                    | ## sideway then huge up 
+                                    ((((((df["Close"] - df["Open"]).abs() / df["Open"]) * 100).shift(2).rolling(5).mean()) < 1.20)
+                                      & (((df["High"].shift(1) > df["BBM"].shift(1)) &
+                                        (df["High"].shift(1) > df["BBM"].shift(2)) &
+                                        (df["High"].shift(2) > df["BBM"].shift(3)) &
+                                        (df["High"].shift(2) > df["BBM"].shift(4)) &
+                                        (df["High"].shift(3) > df["BBM"].shift(5))) |
+                                        ((df["High"].shift(3) > df["EMA9"].shift(1)) &
+                                        (df["High"].shift(4) > df["EMA9"].shift(2)) &
+                                        (df["High"].shift(4) > df["EMA9"].shift(3)) &
+                                        (df["High"].shift(5) > df["EMA9"].shift(4)) &
+                                        (df["High"].shift(5) > df["EMA9"].shift(5))))
+                                    & (df["High"] > df["High"].shift(1).rolling(6).mean())                                   
+                                    & (df['BBU_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'] < 150) & (df['BBM_Angle_Degree'] < 170)
+                                    & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df['volume_profile'] == 1)
+                                    & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & (df["BBU"] < df["High"])
+                                    & (df['BBU_Angle_Degree'] > 100)
+                                    ) 
+
     ) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
 
      ## supreme low signal condition with heavy dropdown and then curvy upside
@@ -793,7 +812,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df['EMA_Angle_Degree'] < 150)
                                      & (df['BBM_Angle_Degree'].shift(1) > df['BBM_Angle_Degree'])
                                      & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
-                                     & (df['High'].shift(1) > df['EMA9'].shift(1)) & (df['High'].shift(1) > df['BBM'].shift(1))                                     
+                                     & (df['High'].shift(1) > df['EMA9'].shift(1)) & (df['High'].shift(1) > df['BBM'].shift(1))
+                                     & (((df['High'] > df['High'].shift(1))) | ((df['High'] > df['High'].shift(2))))                                 
                                     )
                                     | ((df['BBU_Angle_Degree'].shift(1).rolling(window=7).mean() > 200) 
                                      & (df['BBL_Angle_Degree'].shift(1).rolling(window=3).mean() < 150)
@@ -803,6 +823,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
                                      & (df['High'].shift(1) > df['EMA9'].shift(1)) & (df['High'].shift(1) > df['BBM'].shift(1))
                                      & ((df['BBM'].shift(6) > df['EMA9'].shift(6)) | (df['BBM'].shift(5) > df['EMA9'].shift(5)))
+                                     & (((df['High'] > df['High'].shift(1))) | ((df['High'] > df['High'].shift(2)))) 
                                      )
                                      ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
     
