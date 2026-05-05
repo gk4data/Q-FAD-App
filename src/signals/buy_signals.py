@@ -662,8 +662,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     #fix it to give valid signals only & can also add high greater than bbu
                                     (drop_down_signal_for_cond_ema_cross &  ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
-                                    ### ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm with close below bbm in past 5-6 candles
-                                    ### only in uptrend and with strong angle of ema and bbm to avoid false signal in sideways market, can give good signal in case of strong pullback in uptrend 
+                                    ## ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm with close below bbm in past 5-6 candles
+                                    ## only in uptrend and with strong angle of ema and bbm to avoid false signal in sideways market, can give good signal in case of strong pullback in uptrend 
                                     ((((df["EMA9"].shift(5) > df["Close"].shift(5)) & (df['Close'].shift(5) < df['BBM'].shift(5)))  
                                      | ((df["EMA9"].shift(4) > df["Close"].shift(4)) & (df['Close'].shift(4) < df['BBM'].shift(4)))
                                      | ((df["EMA9"].shift(3) > df["Close"].shift(3)) & (df['Close'].shift(3) < df['BBM'].shift(3))))
@@ -687,6 +687,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df['EMA_Angle_Degree'].shift(1) < 180) & (df['EMA_Angle_Degree'] < 140) & (df['BBU_Angle_Degree'] < 160)
                                      & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend')
                                      & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
+                                     & (df['regime'] != 'sideways')
                                     )
                                     | ## nike signal in uptrend
                                     (((df['Close'].shift(3) > df['BBM'].shift(3)) & (df['Close'].shift(3) > df['EMA9'].shift(3)) & (df['volume_profile'].shift(3) == 0))
@@ -696,6 +697,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df['EMA_Angle_Degree'].shift(1) < 180) & (df['EMA_Angle_Degree'] < 150) & (df['BBU_Angle_Degree'] < 160)
                                      & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend')
                                      & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
+                                     & (df['regime'] != 'sideways')
                                     )
                                     |((df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'].shift(1) < 170) & (df['EMA_Angle_Degree'] < 150) & (df['BBU_Angle_Degree'] < 170)
                                       & ((df['High'].shift(3) > df['BBM'].shift(3)) & (df['High'].shift(3) > df['EMA9'].shift(3)) & (df['volume_profile'].shift(3) == 1) & (df['Low'].shift(3) < df['BBM'].shift(3)))
@@ -712,6 +714,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df['EMA_Angle_Degree'].shift(1) < 180) & (df['EMA_Angle_Degree'] < 140) & (df['BBU_Angle_Degree'] < 160)
                                      & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend')
                                      & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
+                                     & (df['regime'] != 'sideways')
                                     )
                                     |
                                      ## previous lows are lower than BBL and close if above ema bbm and bbu with strong angle of ema and bbm can give good buy signal in uptrend or sideways market with strong bullish momentum

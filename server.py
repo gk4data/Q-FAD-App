@@ -1,6 +1,7 @@
 # server.py - Server logic for Q-FAD Trading App
 import os
 import math
+import json
 import logging
 import traceback
 import tempfile
@@ -114,6 +115,9 @@ def define_server(input, output, session):
     selected_instrument_key = reactive.Value(None)
     selected_exchange = reactive.Value("NSE")
     historical_file_path = os.path.join(os.getcwd(), "live_data", "historical_orders.csv")
+    ui_prefs_path = os.path.join(os.getcwd(), "live_data", "ui_prefs.json")
+    saved_ui_prefs = reactive.Value({})
+    ui_prefs_restored = reactive.Value(False)
 
 
     # ===== Utility Functions =====
@@ -124,6 +128,30 @@ def define_server(input, output, session):
         if d is None:
             return None
         return str(d).strip()
+
+    def _load_ui_prefs():
+        if not os.path.exists(ui_prefs_path):
+            return {}
+        try:
+            with open(ui_prefs_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_ui_prefs(data):
+        try:
+            os.makedirs(os.path.dirname(ui_prefs_path), exist_ok=True)
+            with open(ui_prefs_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as exc:
+            logger.warning("Could not save UI preferences: %s", exc)
+
+    def _get_input_value(input_id, default=None):
+        try:
+            return getattr(input, input_id)()
+        except Exception:
+            return default
 
     def _next_tuesday_for(d: _date) -> _date:
         days_until_tuesday = (1 - d.weekday()) % 7
@@ -545,6 +573,7 @@ def define_server(input, output, session):
     @reactive.effect
     def _init():
         """Initialize app with cached token and auto-load instruments."""
+        saved_ui_prefs.set(_load_ui_prefs())
         cached = client.get_cached_token()
         if cached:
             token.set(cached)
@@ -552,6 +581,73 @@ def define_server(input, output, session):
             _refresh_funds()
         else:
             status_msg.set("[INFO] No valid token. Click 'Show Login URL' to authenticate.")
+
+    @reactive.effect
+    def _restore_ui_prefs():
+        if ui_prefs_restored.get():
+            return
+        prefs = saved_ui_prefs.get() or {}
+
+        if "exchange" in prefs:
+            ui.update_select("exchange", selected=str(prefs["exchange"]), session=session)
+        if "auto_load_instruments" in prefs:
+            ui.update_checkbox("auto_load_instruments", value=bool(prefs["auto_load_instruments"]), session=session)
+        if "select_type" in prefs:
+            ui.update_radio_buttons("select_type", selected=str(prefs["select_type"]), session=session)
+        if "instrument" in prefs:
+            ui.update_text("instrument", value=str(prefs["instrument"]), session=session)
+        if "interval" in prefs:
+            ui.update_select("interval", selected=str(prefs["interval"]), session=session)
+        if "fetch_mode" in prefs:
+            ui.update_radio_buttons("fetch_mode", selected=str(prefs["fetch_mode"]), session=session)
+        if "start_date" in prefs:
+            try:
+                ui.update_date("start_date", value=_dt.strptime(str(prefs["start_date"]), "%Y-%m-%d").date(), session=session)
+            except Exception:
+                pass
+        if "end_date" in prefs:
+            try:
+                ui.update_date("end_date", value=_dt.strptime(str(prefs["end_date"]), "%Y-%m-%d").date(), session=session)
+            except Exception:
+                pass
+        if "auto_save" in prefs:
+            ui.update_checkbox("auto_save", value=bool(prefs["auto_save"]), session=session)
+        if "save_dir" in prefs:
+            ui.update_text("save_dir", value=str(prefs["save_dir"]), session=session)
+
+        ui_prefs_restored.set(True)
+
+    @reactive.effect
+    def _persist_ui_prefs():
+        if not ui_prefs_restored.get():
+            return
+
+        prefs = {
+            "exchange": _get_input_value("exchange", "NSE"),
+            "auto_load_instruments": bool(_get_input_value("auto_load_instruments", True)),
+            "select_type": _get_input_value("select_type", "CE"),
+            "instrument": _get_input_value("instrument", "NSE_FO|40088"),
+            "interval": _get_input_value("interval", "1minute"),
+            "fetch_mode": _get_input_value("fetch_mode", "date_range"),
+            "start_date": _as_iso(_get_input_value("start_date")),
+            "end_date": _as_iso(_get_input_value("end_date")),
+            "auto_save": bool(_get_input_value("auto_save", True)),
+            "save_dir": _get_input_value("save_dir", ""),
+        }
+
+        select_symbol = _get_input_value("select_symbol")
+        if select_symbol:
+            prefs["select_symbol"] = str(select_symbol)
+
+        select_expiry = _as_iso(_get_input_value("select_expiry"))
+        if select_expiry:
+            prefs["select_expiry"] = select_expiry
+
+        select_strike = _get_input_value("select_strike")
+        if select_strike not in (None, ""):
+            prefs["select_strike"] = str(select_strike)
+
+        _save_ui_prefs(prefs)
 
     @reactive.effect
     def _auto_load_instruments():
@@ -1171,7 +1267,11 @@ def define_server(input, output, session):
         if not symbols:
             return ui.div("Load instruments first", style="color: #999;")
         logger.debug("symbol_selector render: %s symbols, default=%s", len(symbols), symbols[0])
-        return ui.input_select("select_symbol", "Choose Symbol", choices=symbols, selected=symbols[0])
+        prefs = saved_ui_prefs.get() or {}
+        selected = prefs.get("select_symbol")
+        if selected not in symbols:
+            selected = symbols[0]
+        return ui.input_select("select_symbol", "Choose Symbol", choices=symbols, selected=selected)
 
     @reactive.effect
     def _update_expiries():
@@ -1210,6 +1310,15 @@ def define_server(input, output, session):
         # Default to next Tuesday
         next_tuesday = get_next_tuesday()
         default = next_tuesday if next_tuesday in expiry_dates else expiry_dates[0]
+        prefs = saved_ui_prefs.get() or {}
+        saved_expiry = prefs.get("select_expiry")
+        if saved_expiry:
+            try:
+                saved_expiry_date = _dt.strptime(str(saved_expiry), "%Y-%m-%d").date()
+                if saved_expiry_date in expiry_dates:
+                    default = saved_expiry_date
+            except Exception:
+                pass
         logger.debug("expiry_selector default (date): %s", default)
         return ui.input_date("select_expiry", "Choose Expiry", value=default)
 
@@ -1244,7 +1353,10 @@ def define_server(input, output, session):
         if instr_type and instr_type.upper() == 'FUT':
             return ui.div("Futures selected — no strike required", style="color: #333;")
 
-        default = str(strikes[0]) if strikes else ""
+        prefs = saved_ui_prefs.get() or {}
+        saved_strike = str(prefs.get("select_strike", "")).strip()
+        strike_strings = [str(s) for s in strikes] if strikes else []
+        default = saved_strike if saved_strike and saved_strike in strike_strings else (strikes[0] if strikes else "")
         helper = (
             ui.div("No strikes found — enter strike manually", style="color: #999;")
             if not strikes
@@ -1252,7 +1364,7 @@ def define_server(input, output, session):
         )
 
         return ui.tags.div(
-            ui.input_text("select_strike", "Strike (enter numeric)", value=default, placeholder="e.g. 23100"),
+            ui.input_text("select_strike", "Strike (enter numeric)", value=str(default), placeholder="e.g. 23100"),
             helper
         )
 
