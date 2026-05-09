@@ -273,6 +273,7 @@ def create_main_ui():
                                     ui.column(3, ui.input_date("historical_bt_start", "From", value=date.today())),
                                     ui.column(3, ui.input_date("historical_bt_end", "To", value=date.today())),
                                     ui.column(3, ui.input_action_button("run_historical_backtest", ui.HTML("<i class='bi bi-play-fill'></i> Run"), class_="btn-primary")),
+                                    ui.column(3, ui.download_button("download_historical_backtest_excel", ui.HTML("<i class='bi bi-file-earmark-excel'></i> Export Excel"), class_="btn-success")),
                                 ),
                                 class_="order-history-actions",
                             ),
@@ -332,6 +333,21 @@ def create_app_ui():
         ui.tags.head(
             ui.tags.link(rel="stylesheet", href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"),
             ui.include_css("static/theme.css"),
+            ui.tags.script(
+                """
+                Shiny.addCustomMessageHandler("trigger_download", function(message) {
+                    const buttonId = message && message.id ? message.id : "";
+                    const delayMs = message && message.delay_ms ? Number(message.delay_ms) : 250;
+                    const triggerClick = function() {
+                        const el = document.getElementById(buttonId);
+                        if (el) {
+                            el.click();
+                        }
+                    };
+                    window.setTimeout(triggerClick, delayMs);
+                });
+                """
+            ),
         ),
         ui.output_ui("app_root"),
     )

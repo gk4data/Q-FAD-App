@@ -276,6 +276,19 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         & ~(downtrend_cabdles) & ~(funnel_openings) & not_while_three_candles_above_ema
     )
 
+    expiry_day = None
+    if expiry_date is not None:
+        expiry_ts = pd.to_datetime(expiry_date, errors='coerce')
+        if pd.notna(expiry_ts):
+            expiry_day = expiry_ts.date()
+
+    is_expiry_day = (df['Date'].dt.date == expiry_day) if expiry_day is not None else pd.Series(False, index=df.index)
+    no_trade_on_expiry_after_13 = (
+        is_expiry_day
+        & (df['Date'].dt.time >= pd.to_datetime('13:00:00').time())
+        & ~(df['Close'] > df['VWAP'])
+    )
+
     unstable_candle = ((range_pct >= 7) | (total_wick_pct >= 0.80) 
                        | ((upper_wick_pct >= 0.65) & (body_pct_range <= 0.35))
                        | ((upper_wick_pct >= 0.75) | (lower_wick_pct >= 0.75))
@@ -532,7 +545,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                   (prev_low_close_to_bbl & (df['Trend'] == 'Uptrend') & (df['BB_trend'] == 'bullish') & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
                                    & ((df['EMA_Trend'] == 'Uptrend') | (df['EMA_Trend'] == 'Flat')) & (df['volume_profile'] == 1) & (df['volume_profile'].shift(1) == 1)
                                    & (df['BBM_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'].shift(1) < 160))
-                                  )
+                                  ) & ~(no_trade_on_expiry_after_13) & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series & (~unstable_candle)
                                     
     # code for lowest point buys 
     bbu_gt_ema9_any_past20 = (
@@ -566,18 +579,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     ema_above_bbu_trigger = (df["EMA9"] > df["BBU"]) & recent_bbm_above_ema
     ema_above_bbu_window = (ema_above_bbu_trigger.groupby(trading_day).transform(lambda s: s.rolling(window=7, min_periods=1).max().astype(bool)))
     ema_recovery_after_bbu = ((df["EMA9"] > df["BBM"]) | (df["Close"] > df["BBU"])) & ema_above_bbu_window
-    expiry_day = None
-    if expiry_date is not None:
-        expiry_ts = pd.to_datetime(expiry_date, errors='coerce')
-        if pd.notna(expiry_ts):
-            expiry_day = expiry_ts.date()
-
-    is_expiry_day = (df['Date'].dt.date == expiry_day) if expiry_day is not None else pd.Series(False, index=df.index)
-    no_trade_on_expiry_after_13 = (
-        is_expiry_day
-        & (df['Date'].dt.time >= pd.to_datetime('13:00:00').time())
-        & ~(df['Close'] > df['VWAP'])
-    )
+    
     ema_recovery_after_bbu_setup = (ema_recovery_after_bbu & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) 
                                     & (df['BBU_Angle_Degree'] >= 100) & (df['BBU_Angle_Degree'] <= 160) & (df['EMA_Angle_Degree'] < 160) 
                                     & (df['BBU_Angle_Degree'].shift(1) < 250) & ~(no_trade_on_expiry_after_13))
@@ -655,15 +657,15 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     | ### this need to be tested how its working 
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
                                     |
-                                    mfi_exit_happened_recently
+                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
-                                    # ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm 
-                                    # need to fix the sideways market condition for this setup as it can give false signal in sideways market with low angle of ema and bbm
-                                    #fix it to give valid signals only & can also add high greater than bbu
+                                    # #ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm 
+                                    #  #need to fix the sideways market condition for this setup as it can give false signal in sideways market with low angle of ema and bbm
+                                    # # fix it to give valid signals only & can also add high greater than bbu
                                     (drop_down_signal_for_cond_ema_cross &  ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
-                                    ## ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm with close below bbm in past 5-6 candles
-                                    ## only in uptrend and with strong angle of ema and bbm to avoid false signal in sideways market, can give good signal in case of strong pullback in uptrend 
+                                    # ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm with close below bbm in past 5-6 candles
+                                    # only in uptrend and with strong angle of ema and bbm to avoid false signal in sideways market, can give good signal in case of strong pullback in uptrend 
                                     ((((df["EMA9"].shift(5) > df["Close"].shift(5)) & (df['Close'].shift(5) < df['BBM'].shift(5)))  
                                      | ((df["EMA9"].shift(4) > df["Close"].shift(4)) & (df['Close'].shift(4) < df['BBM'].shift(4)))
                                      | ((df["EMA9"].shift(3) > df["Close"].shift(3)) & (df['Close'].shift(3) < df['BBM'].shift(3))))
@@ -677,7 +679,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
                                      & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time())
                                     )
-                                    # ## same as new uptrend signal when trend continue in uptrend 
+                                    ## same as new uptrend signal when trend continue in uptrend 
                                     |
                                     (((df['Close'].shift(3) > df['BBM'].shift(3)) & (df['Close'].shift(3) > df['EMA9'].shift(3)) & (df['volume_profile'].shift(3) == 0))
                                      & ((df['Close'].shift(4) > df['BBM'].shift(4)) & (df['Close'].shift(4) > df['EMA9'].shift(4)) & (df['volume_profile'].shift(4) == 0))
@@ -804,8 +806,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df['volume_profile'] == 1)
                                     & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & (df["BBU"] < df["High"])
                                     & (df['BBU_Angle_Degree'] > 100)
-                                    ) 
-
+                                    )
     ) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
 
      ## supreme low signal condition with heavy dropdown and then curvy upside
@@ -828,6 +829,9 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & ((df['BBM'].shift(6) > df['EMA9'].shift(6)) | (df['BBM'].shift(5) > df['EMA9'].shift(5)))
                                      & (((df['High'] > df['High'].shift(1))) | ((df['High'] > df['High'].shift(2)))) 
                                      )
+                                     | (((condition_downtrend_reverse.shift(1)) | (condition_downtrend_reverse.shift(2))) 
+                                     & (df['EMA_Angle_Degree'] < 175) & (df['volume_profile'] == 1) & (df['EMA_Angle_Degree'] < df['EMA_Angle_Degree'].shift(1))
+                                     & ((df["High"] > df["High"].shift(1)) | (df["High"] > df["High"].shift(2))))
                                      ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
     
     df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
@@ -836,7 +840,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2 & trade_allowed & (~unstable_candle)
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series & (~unstable_candle)
     df['RSI_pct_buy'] = RSI_pct_buy_signal & trade_allowed & (~unstable_candle)
-    df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse & ~(no_trade_on_expiry_after_13) & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series & (~unstable_candle)
+    df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse
     df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time > pd.to_datetime('09:20:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series & (~unstable_candle)
 
     return df

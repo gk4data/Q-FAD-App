@@ -746,40 +746,14 @@ def define_server(input, output, session):
         if df is None or df.empty:
             return ui.tags.span("[INFO] Summary will appear after running Historical Backtest", class_="oh-status-text")
 
-        work = df.copy()
-        if "Date" in work.columns:
-            work = work[work["Date"].astype(str) != "TOTAL"].copy()
-        if work.empty:
+        summary_df = _build_historical_backtest_summary_df(df)
+        if summary_df.empty:
             return ui.tags.span("[INFO] No backtest rows available for summary", class_="oh-status-text")
-
-        work["Return (%)"] = pd.to_numeric(work.get("Return (%)", 0.0), errors="coerce").fillna(0.0)
-        base_capital = 100000.0
-        if "Total Profit (₹)" in work.columns:
-            work["Total Profit (₹)"] = pd.to_numeric(work["Total Profit (₹)"], errors="coerce").fillna(0.0)
-        else:
-            work["Total Profit (₹)"] = (work["Return (%)"] / 100.0) * base_capital
-
-        rows_count = len(work)
-        days_count = work["Date"].astype(str).nunique() if "Date" in work.columns else 0
-        total_invested = float(rows_count * base_capital)
-        total_return_amount = float(work["Total Profit (₹)"].sum())
-        total_pnl_pct = (total_return_amount / total_invested) * 100.0 if total_invested > 0 else 0.0
-        total_return_on_capital_pct = (total_return_amount / base_capital) * 100.0 if base_capital > 0 else 0.0
-
-        comp_capital = base_capital
-        if "Side" in work.columns:
-            side_order = {"CE": 0, "PE": 1}
-            work["_side"] = work["Side"].astype(str).str.upper().map(side_order).fillna(9)
-            work = work.sort_values(["Date", "_side"]).drop(columns=["_side"])
-        else:
-            work = work.sort_values(["Date"])
-        for r in work["Return (%)"].tolist():
-            comp_capital *= (1.0 + (float(r) / 100.0))
-        comp_final_return = comp_capital - base_capital
-        comp_final_pct = ((comp_capital / base_capital) - 1.0) * 100.0
 
         def _fmt_inr(v):
             return f"₹{v:,.2f}"
+
+        summary_map = dict(zip(summary_df["Metric"], summary_df["Value"]))
         
         def _section_card(title, rows, bg):
             tr_nodes = []
@@ -800,18 +774,18 @@ def define_server(input, output, session):
             )
 
         normal_rows = [
-            ("Backtest Days", str(days_count)),
-            ("Rows (CE+PE)", str(rows_count)),
-            ("Total Invested", _fmt_inr(total_invested)),
-            ("Total Return Amount", _fmt_inr(total_return_amount)),
-            ("Average Session PnL %", f"{total_pnl_pct:.2f}%"),
-            ("Return on Base Capital", f"{total_return_on_capital_pct:.2f}%"),
+            ("Backtest Days", str(int(summary_map.get("Backtest Days", 0)))),
+            ("Rows (CE+PE)", str(int(summary_map.get("Rows (CE+PE)", 0)))),
+            ("Total Invested", _fmt_inr(float(summary_map.get("Total Invested", 0.0)))),
+            ("Total Return Amount", _fmt_inr(float(summary_map.get("Total Return Amount", 0.0)))),
+            ("Average Session PnL %", f"{float(summary_map.get('Average Session PnL %', 0.0)):.2f}%"),
+            ("Return on Base Capital", f"{float(summary_map.get('Return on Base Capital %', 0.0)):.2f}%"),
         ]
         comp_rows = [
-            ("Initial Investment (Day 1)", _fmt_inr(base_capital)),
-            ("Compounding Final Capital", _fmt_inr(comp_capital)),
-            ("Compounding Final Return", _fmt_inr(comp_final_return)),
-            ("Compounding Final Return %", f"{comp_final_pct:.2f}%"),
+            ("Initial Investment (Day 1)", _fmt_inr(float(summary_map.get("Base Capital", 0.0)))),
+            ("Compounding Final Capital", _fmt_inr(float(summary_map.get("Compounding Final Capital", 0.0)))),
+            ("Compounding Final Return", _fmt_inr(float(summary_map.get("Compounding Final Return", 0.0)))),
+            ("Compounding Final Return %", f"{float(summary_map.get('Compounding Final Return %', 0.0)):.2f}%"),
         ]
 
         return ui.div(
@@ -845,6 +819,57 @@ def define_server(input, output, session):
             return float(v)
         except Exception:
             return np.nan
+
+    def _build_historical_backtest_summary_df(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Metric", "Value"])
+
+        work = df.copy()
+        if "Date" in work.columns:
+            work = work[work["Date"].astype(str) != "TOTAL"].copy()
+        if work.empty:
+            return pd.DataFrame(columns=["Metric", "Value"])
+
+        work["Return (%)"] = pd.to_numeric(work.get("Return (%)", 0.0), errors="coerce").fillna(0.0)
+        base_capital = 100000.0
+        if "Total Profit (₹)" in work.columns:
+            work["Total Profit (₹)"] = pd.to_numeric(work["Total Profit (₹)"], errors="coerce").fillna(0.0)
+        else:
+            work["Total Profit (₹)"] = (work["Return (%)"] / 100.0) * base_capital
+
+        rows_count = len(work)
+        days_count = work["Date"].astype(str).nunique() if "Date" in work.columns else 0
+        total_invested = float(rows_count * base_capital)
+        total_return_amount = float(work["Total Profit (₹)"].sum())
+        total_pnl_pct = (total_return_amount / total_invested) * 100.0 if total_invested > 0 else 0.0
+        total_return_on_capital_pct = (total_return_amount / base_capital) * 100.0 if base_capital > 0 else 0.0
+
+        comp_capital = base_capital
+        if "Side" in work.columns:
+            side_order = {"CE": 0, "PE": 1}
+            work["_side"] = work["Side"].astype(str).str.upper().map(side_order).fillna(9)
+            work = work.sort_values(["Date", "_side"]).drop(columns=["_side"])
+        else:
+            work = work.sort_values(["Date"])
+        for r in work["Return (%)"].tolist():
+            comp_capital *= (1.0 + (float(r) / 100.0))
+        comp_final_return = comp_capital - base_capital
+        comp_final_pct = ((comp_capital / base_capital) - 1.0) * 100.0
+
+        return pd.DataFrame(
+            [
+                {"Metric": "Backtest Days", "Value": days_count},
+                {"Metric": "Rows (CE+PE)", "Value": rows_count},
+                {"Metric": "Base Capital", "Value": round(base_capital, 2)},
+                {"Metric": "Total Invested", "Value": round(total_invested, 2)},
+                {"Metric": "Total Return Amount", "Value": round(total_return_amount, 2)},
+                {"Metric": "Average Session PnL %", "Value": round(total_pnl_pct, 2)},
+                {"Metric": "Return on Base Capital %", "Value": round(total_return_on_capital_pct, 2)},
+                {"Metric": "Compounding Final Capital", "Value": round(comp_capital, 2)},
+                {"Metric": "Compounding Final Return", "Value": round(comp_final_return, 2)},
+                {"Metric": "Compounding Final Return %", "Value": round(comp_final_pct, 2)},
+            ]
+        )
 
     def _build_order_history(order_rows, trade_rows):
         order_df = pd.DataFrame(order_rows) if order_rows else pd.DataFrame()
@@ -2650,7 +2675,7 @@ def define_server(input, output, session):
 
     @reactive.effect
     @reactive.event(input.run_historical_backtest)
-    def _run_historical_backtest():
+    async def _run_historical_backtest():
         access_token = token.get()
         if not access_token:
             historical_bt_status_msg.set("[ERROR] Authenticate first")
@@ -2900,6 +2925,10 @@ def define_server(input, output, session):
         historical_bt_data.set(out_df)
         historical_bt_status_msg.set(
             f"[OK] Historical backtest complete: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+        )
+        await session.send_custom_message(
+            "trigger_download",
+            {"id": "download_historical_backtest_excel", "delay_ms": 300},
         )
 
     # ===== Chart Visualization =====
@@ -3220,4 +3249,25 @@ def define_server(input, output, session):
         tmp_fd, tmp_path = tempfile.mkstemp(prefix="qfad_sig_", suffix=".csv")
         os.close(tmp_fd)
         df.to_csv(tmp_path, index=False)
+        return tmp_path
+
+    @render.download(filename=lambda: f"historical_backtest_{_date.today().strftime('%Y-%m-%d')}.xlsx")
+    def download_historical_backtest_excel():
+        df = historical_bt_data.get()
+        if df is None or df.empty:
+            return ""
+
+        start_iso = _as_iso(_get_input_value("historical_bt_start", "")) or "start"
+        end_iso = _as_iso(_get_input_value("historical_bt_end", "")) or "end"
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            prefix=f"qfad_historical_backtest_{start_iso}_{end_iso}_",
+            suffix=".xlsx",
+        )
+        os.close(tmp_fd)
+
+        export_df = df.copy()
+
+        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+            export_df.to_excel(writer, sheet_name="Historical Backtest", index=False)
+
         return tmp_path
