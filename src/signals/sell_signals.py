@@ -174,6 +174,13 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 & (df['volume_profile'].shift(2) == 0) & (df['volume_profile'].shift(1) == 0) & (df['volume_profile'] == 0)
                                 & (df['BBM'] > df['Close']) & (df['EMA9'] > df['Close']) & (df['EMA_Angle_Degree'] >= df['EMA_Angle_Degree'].shift(1))
                                 & (df['EMA_Angle_Degree'] >= 190) & (df['BBU_Angle_Degree'] >= 180))
+                              # |(((df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')) 
+                              # & ((df['Low'].shift(1).rolling(window=6).mean() > df['Low']) | (df['Low'].shift(1).rolling(window=7).mean() > df['Low']))
+                              # & ((df['BBU_Angle_Degree']) > (df['BBU_Angle_Degree'].shift(1)))
+                              # & ((df['BBU_Angle_Degree'].shift(1).rolling(window=6).mean() < df['BBU_Angle_Degree'])
+                              #    | (df['BBU_Angle_Degree'].shift(1).rolling(window=7).mean() < df['BBU_Angle_Degree']))
+                              # & ((df['EMA_Angle_Degree']) > (df['EMA_Angle_Degree'].shift(1))) & (df['EMA9'] > df['Close'])
+                              # & ((df['BBL']) > (df['BBL'].shift(1))) & (df['volume_profile'] == 0))
                               )
                         
     ema_downside_sell = ((df['regime'] == 'sideways') & (df['volume_profile'] == 0)
