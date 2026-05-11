@@ -5,6 +5,7 @@ from shiny import ui
 from shinywidgets import output_widget
 
 SIDEBAR_HEADER_STYLE = "text-align:center; font-weight:700; font-size:1.15rem;"
+SUBSECTION_HEADER_STYLE = "text-align:left; font-weight:700; font-size:1.05rem;"
 
 
 # ---------------- AUTH UI ----------------
@@ -109,7 +110,7 @@ def data_processing_card():
 
 def live_data_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-record-circle"), " Live Data (REST API)", style=SIDEBAR_HEADER_STYLE),
+        ui.h5(ui.tags.i(class_="bi bi-record-circle"), " REST API", style=SUBSECTION_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_live_data", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_live_data", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
@@ -120,7 +121,7 @@ def live_data_card():
 
 def websocket_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (Websocket Full Feed)", style=SIDEBAR_HEADER_STYLE),
+        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Full Feed WebSocket", style=SUBSECTION_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_websocket", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_websocket", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
@@ -131,12 +132,24 @@ def websocket_card():
 
 def ltpc_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-broadcast-pin"), " Live Data (LTPC)", style=SIDEBAR_HEADER_STYLE),
+        ui.h5(ui.tags.i(class_="bi bi-broadcast-pin"), " LTPC WebSocket", style=SUBSECTION_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_ltpc", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_ltpc", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
         ui.output_text_verbatim("ltpc_status"),
+    )
+
+
+def live_data_section_card():
+    return ui.div(
+        ui.h5(ui.tags.i(class_="bi bi-broadcast"), " Live Data", style=SIDEBAR_HEADER_STYLE),
+        ui.tags.hr(style="margin: 10px 0 12px 0; border: 0; border-top: 2px solid rgba(255,255,255,0.28);"),
+        ui.div(live_data_card(), class_="live-data-subcard"),
+        ui.tags.hr(style="margin: 12px 0; border: 0; border-top: 2px solid rgba(255,255,255,0.22);"),
+        ui.div(websocket_card(), class_="live-data-subcard"),
+        ui.tags.hr(style="margin: 12px 0; border: 0; border-top: 2px solid rgba(255,255,255,0.22);"),
+        ui.div(ltpc_card(), class_="live-data-subcard"),
     )
 
 
@@ -236,9 +249,7 @@ def create_main_ui():
                     "input.sidebar_mode === 'data'",
                     ui.div(
                         ui.div(data_processing_card(), class_="sidebar-card sidebar-card-tall"),
-                        ui.div(live_data_card(), class_="sidebar-card sidebar-card-tall"),
-                        ui.div(websocket_card(), class_="sidebar-card sidebar-card-tall"),
-                        ui.div(ltpc_card(), class_="sidebar-card sidebar-card-tall"),
+                        ui.div(live_data_section_card(), class_="sidebar-card sidebar-card-tall"),
                     )
                 ),
 
