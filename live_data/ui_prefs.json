@@ -1,15 +1,15 @@
 {
-  "exchange": "NSE",
+  "exchange": "MCX",
   "auto_load_instruments": true,
   "select_type": "CE",
-  "instrument": "NSE_FO|41754",
+  "instrument": "MCX_FO|561690",
   "interval": "1minute",
   "fetch_mode": "intraday",
   "start_date": "2026-05-11",
   "end_date": "2026-05-11",
   "auto_save": true,
   "save_dir": "",
-  "select_symbol": "NIFTY",
-  "select_expiry": "2026-05-12",
-  "select_strike": "24000"
+  "select_symbol": "NATURALGAS",
+  "select_expiry": "2026-05-22",
+  "select_strike": "270"
 }
