@@ -120,12 +120,23 @@ def live_data_card():
 
 def websocket_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (WebSocket)", style=SIDEBAR_HEADER_STYLE),
+        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (Websocket Full Feed)", style=SIDEBAR_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_websocket", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_websocket", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
         ui.output_text_verbatim("websocket_status"),
+    )
+
+
+def ltpc_card():
+    return ui.div(
+        ui.h5(ui.tags.i(class_="bi bi-broadcast-pin"), " Live Data (LTPC)", style=SIDEBAR_HEADER_STYLE),
+        ui.row(
+            ui.column(6, ui.input_action_button("start_ltpc", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
+            ui.column(6, ui.input_action_button("stop_ltpc", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+        ),
+        ui.output_text_verbatim("ltpc_status"),
     )
 
 
@@ -227,6 +238,7 @@ def create_main_ui():
                         ui.div(data_processing_card(), class_="sidebar-card sidebar-card-tall"),
                         ui.div(live_data_card(), class_="sidebar-card sidebar-card-tall"),
                         ui.div(websocket_card(), class_="sidebar-card sidebar-card-tall"),
+                        ui.div(ltpc_card(), class_="sidebar-card sidebar-card-tall"),
                     )
                 ),
 
