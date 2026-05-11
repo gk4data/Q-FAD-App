@@ -213,34 +213,6 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
       (trade_if_vwap_back_t3 & t3_window)
     )
 
-   # base per-row allowed signal (before last-leg prerequisite):
-   # `allow_basic` should influence only the first leg (09:15-10:14).
-    base_allowed_trade_series = (
-      ((allow_basic & t0_window) | trade_if_vwap_back_series)
-      & (~(no_trade_if_vwap_fail))
-      & (~effective_no_trade_gap_up_red_at_all)
-    )
-
-   # apply market-time window (same as you had)
-    time_window = (df['Date'].dt.time > pd.to_datetime('09:36:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
-
-   # Last-leg guard: each prior leg must have seen at least one tradable row.
-    t0_had_trade = bool((base_allowed_trade_series & time_window & t0_window).any())
-    t1_had_trade = bool((base_allowed_trade_series & time_window & t1_window).any())
-    t2_had_trade = bool((base_allowed_trade_series & time_window & t2_window).any())
-    allow_t3_from_prior_legs = t0_had_trade or t1_had_trade or t2_had_trade
-
-   # final per-row allowed signal:
-    allowed_trade_series = base_allowed_trade_series & ((~t3_window) | allow_t3_from_prior_legs)
-    trade_allowed = time_window & allowed_trade_series
-
-# trade_allowed is a boolean Series you can use to filter or trigger trades
-    #trade_allowed = True
-    
-    # Use `trade_allowed` in your signals (replace previous `no_trade_time`)
-    # e.g.
-    # df['Buy_Signal'] = <your_big_boolean_expr> & trade_allowed
-
 ## no trade on extrme cadles 
     candle_range = (df['High'] - df['Low']).replace(0, np.nan)
     range_pct = (candle_range / df['Open']) * 100
@@ -276,6 +248,46 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         & ~(downtrend_cabdles) & ~(funnel_openings) & not_while_three_candles_above_ema
     )
 
+    unstable_candle = ((range_pct >= 7) | (total_wick_pct >= 0.80) 
+                       | ((upper_wick_pct >= 0.65) & (body_pct_range <= 0.35))
+                       | ((upper_wick_pct >= 0.75) | (lower_wick_pct >= 0.75))
+                       | (very_small_green_candle) | (very_small_red_candle)
+                       | low_bb_width_candle
+                       )
+    
+    df['unstable_candle'] = unstable_candle
+
+    # ## No Trade if way too much unstable candles
+    # opening_unstable_window = ((df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) &(df['Date'].dt.time < pd.to_datetime('10:15:00').time()))
+    # unstable_count_till_1015 = int(df.loc[opening_unstable_window, 'unstable_candle'].sum())
+
+    # no_trade_after_1015_due_to_unstable_opening = (unstable_count_till_1015 >= 30)
+
+    # unstable_opening_gate = (no_trade_after_1015_due_to_unstable_opening & (df['Date'].dt.time >= pd.to_datetime('10:15:00').time()))
+
+    # base per-row allowed signal (before last-leg prerequisite):
+   # `allow_basic` should influence only the first leg (09:15-10:14).
+    base_allowed_trade_series = (
+      ((allow_basic & t0_window) | trade_if_vwap_back_series)
+      & (~(no_trade_if_vwap_fail))
+      & (~effective_no_trade_gap_up_red_at_all)
+      #& (~unstable_opening_gate)
+    )
+
+   # apply market-time window (same as you had)
+    time_window = (df['Date'].dt.time > pd.to_datetime('09:36:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
+
+   # Last-leg guard: each prior leg must have seen at least one tradable row.
+    t0_had_trade = bool((base_allowed_trade_series & time_window & t0_window).any())
+    t1_had_trade = bool((base_allowed_trade_series & time_window & t1_window).any())
+    t2_had_trade = bool((base_allowed_trade_series & time_window & t2_window).any())
+    allow_t3_from_prior_legs = t0_had_trade or t1_had_trade or t2_had_trade
+
+   # final per-row allowed signal:
+    allowed_trade_series = base_allowed_trade_series & ((~t3_window) | allow_t3_from_prior_legs)
+    trade_allowed = time_window & allowed_trade_series
+
+   ## expiry date check 
     expiry_day = None
     if expiry_date is not None:
         expiry_ts = pd.to_datetime(expiry_date, errors='coerce')
@@ -289,15 +301,6 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         & ~(df['Close'] > df['VWAP'])
     )
 
-    unstable_candle = ((range_pct >= 7) | (total_wick_pct >= 0.80) 
-                       | ((upper_wick_pct >= 0.65) & (body_pct_range <= 0.35))
-                       | ((upper_wick_pct >= 0.75) | (lower_wick_pct >= 0.75))
-                       | (very_small_green_candle) | (very_small_red_candle)
-                       | low_bb_width_candle
-                       )
-    
-    df['unstable_candle'] = unstable_candle
-    
 ## signal logics
     condition_rsi = (df['RSI']< 75) 
     condition_stochrsi_crossover = df['STOCHRSIk'] > df['STOCHRSId']
@@ -637,11 +640,26 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                 &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05)
                 & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50))
     
+    uptrend_sell = (((df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')) 
+                                      & ((df['Low'].shift(1).rolling(window=6).mean() > df['Low']) | (df['Low'].shift(1).rolling(window=7).mean() > df['Low']))
+                                      & ((df['BBU_Angle_Degree']) > (df['BBU_Angle_Degree'].shift(1)))
+                                      & ((df['BBU_Angle_Degree'].shift(1).rolling(window=6).mean() < df['BBU_Angle_Degree'])
+                                         | (df['BBU_Angle_Degree'].shift(1).rolling(window=7).mean() < df['BBU_Angle_Degree']))
+                                      & ((df['EMA_Angle_Degree']) > (df['EMA_Angle_Degree'].shift(1))) & (df['EMA9'] > df['Close'])
+                                      & ((df['BBL']) > (df['BBL'].shift(1))) & (df['volume_profile'] == 0))
+    
     mfi_exit_happened_recently = ((mfi_exit.shift(2, fill_value=False)| mfi_exit.shift(3, fill_value=False))
                                     & (df['High'] > df['BBU']) & (df['Close'].shift(1) < df['Close']) & (df['volume_profile'].shift(1) == 1)
                                     & (df['EMA9'] > df['BBM']) & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 160) 
                                     & (df['EMA_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'].shift(1) < 180)
-                                )     
+                                ) 
+
+    uptrend_sell_heppened_recently = ((uptrend_sell.shift(2, fill_value=False)| uptrend_sell.shift(3, fill_value=False) | uptrend_sell.shift(4, fill_value=False))
+                                    & ((df['High'] > df['High'].shift(1)) | (df['High'] > df['High'].shift(2))) 
+                                    & (df['Close'].shift(1) < df['Close']) & (df['volume_profile'].shift(1) == 1)
+                                    & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 190) & ((df['EMA9'] > df['BBM']) | (df['BBU_Angle_Degree'] <= 160))
+                                    & (df['EMA_Angle_Degree'] < 170)
+                                )        
     
     condition_ema_bbu_crossover = ( 
                                     ((df['EMA9'] > df['BBM']) & (df['BBU_Angle_Degree'] >= 100) ## ema crossing at BBU at opening or major trend change with vwap crossing ema9
@@ -658,6 +676,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
                                     |
                                     (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
+                                    |
+                                    (uptrend_sell_heppened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
                                     # #ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm 
                                     #  #need to fix the sideways market condition for this setup as it can give false signal in sideways market with low angle of ema and bbm
