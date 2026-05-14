@@ -1232,6 +1232,23 @@ def define_server(input, output, session):
             traceback.print_exc()
 
     @reactive.effect
+    @reactive.event(input.use_access_token)
+    def _use_access_token():
+        raw_token = input.access_token()
+        if not raw_token or raw_token.strip() == "":
+            status_msg.set("[ERROR] Please provide a valid access token")
+            return
+        tkn = raw_token.strip()
+        token.set(tkn)
+        if client.token_manager:
+            try:
+                client.token_manager.save_token(tkn)
+            except Exception as exc:
+                logger.warning("Failed to cache manual access token: %s", exc)
+        status_msg.set("[OK] Access token set and cached.")
+        _refresh_funds()
+
+    @reactive.effect
     @reactive.event(input.clear_cache)
     def _clear_cache():
         if client.token_manager:

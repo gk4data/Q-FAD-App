@@ -26,8 +26,15 @@ def create_auth_ui():
             ui.output_ui("login_url_display"),
             ui.input_text("auth_code", "Authorization Code", placeholder="Paste your auth code here"),
             ui.row(
-                ui.column(6, ui.input_action_button("do_auth", ui.HTML("<i class='bi bi-check2'></i> Submit"), class_="btn-success")),
-                ui.column(6, ui.input_action_button("clear_cache", ui.HTML("<i class='bi bi-box-arrow-right'></i> Logout"), class_="btn-danger")),
+                ui.column(12, ui.input_action_button("do_auth", ui.HTML("<i class='bi bi-check2'></i> Submit"), class_="btn-success", style="width:100%; margin-bottom: 12px;")),
+            ),
+            ui.div("OR", style="text-align:center; font-weight:700; margin: 0 0 12px 0;"),
+            ui.input_password("access_token", "Access Token (if already available)", placeholder="Paste your access token here"),
+            ui.row(
+                ui.column(12, ui.input_action_button("use_access_token", ui.HTML("<i class='bi bi-key-fill'></i> Use Token"), class_="btn-warning", style="width:100%; margin-bottom: 12px;")),
+            ),
+            ui.row(
+                ui.column(12, ui.input_action_button("clear_cache", ui.HTML("<i class='bi bi-box-arrow-right'></i> Logout"), class_="btn-danger")),
             ),
             style="margin-bottom: 24px;"
         ),
