@@ -718,11 +718,11 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     | ### this need to be tested how its working 
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
                                     |
-                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13))
+                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
                                     (uptrend_sell_heppened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
-                                    ((alt_sell_heppened_recently) & ~(no_trade_on_expiry_after_13)) #& (~unstable_candle))
+                                    ((alt_sell_heppened_recently) & ~(no_trade_on_expiry_after_13))
                                     |
                                     # #ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm 
                                     #  #need to fix the sideways market condition for this setup as it can give false signal in sideways market with low angle of ema and bbm
