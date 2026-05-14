@@ -255,19 +255,19 @@ def plot_signals(df):
 
     # Bollinger Bands
     if 'BBL' in df.columns:
-        fig.add_trace(go.Scatter(x=x_vals, y=df['BBL'], line=dict(color='blue', width=1), name="Lower BB", hovertemplate='<b>Lower BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
-    
+        fig.add_trace(go.Scatter(x=x_vals, y=df['BBL'], mode='lines', line=dict(color='blue', width=1), name="Lower BB", hovertemplate='<b>Lower BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
+
     if 'BBU' in df.columns:
-        fig.add_trace(go.Scatter(x=x_vals, y=df['BBU'], line=dict(color='blue', width=1), name="Upper BB", hovertemplate='<b>Upper BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
-    
+        fig.add_trace(go.Scatter(x=x_vals, y=df['BBU'], mode='lines', line=dict(color='blue', width=1), name="Upper BB", hovertemplate='<b>Upper BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
+
     if 'BBM' in df.columns:
-        fig.add_trace(go.Scatter(x=x_vals, y=df['BBM'], line=dict(color='orange', width=1), name="Middle BB", hovertemplate='<b>Middle BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
-    
+        fig.add_trace(go.Scatter(x=x_vals, y=df['BBM'], mode='lines', line=dict(color='orange', width=1), name="Middle BB", hovertemplate='<b>Middle BB</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
+
     if 'EMA9' in df.columns:
-        fig.add_trace(go.Scatter(x=x_vals, y=df['EMA9'], line=dict(color='black', width=1), name="EMA9", hovertemplate='<b>EMA9</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
-    
+        fig.add_trace(go.Scatter(x=x_vals, y=df['EMA9'], mode='lines', line=dict(color='black', width=1), name="EMA9", hovertemplate='<b>EMA9</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
+
     if 'VWAP' in df.columns:
-        fig.add_trace(go.Scatter(x=x_vals, y=df['VWAP'], line=dict(color='purple', width=2), name="VWAP", hovertemplate='<b>VWAP</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=x_vals, y=df['VWAP'], mode='lines', line=dict(color='purple', width=2), name="VWAP", hovertemplate='<b>VWAP</b><br>%{x|%Y-%m-%d %H:%M:%S}<br>%{y:.2f}<extra></extra>'), row=1, col=1)
 
     # ===== ROW 2: Volume =====
     volume_colors = ['green' if c >= o else 'red' for c, o in zip(df['Close'], df['Open'])]
@@ -417,6 +417,9 @@ def plot_signals(df):
         tickfont=dict(color="#4a4a5e", size=10, family="Inter, Segoe UI, sans-serif"),
         title_font=dict(color="#1a1a1a", size=12, family="Inter, Segoe UI Semibold, sans-serif")
     )
+
+    if 'Volume' in df.columns and pd.to_numeric(df['Volume'], errors='coerce').fillna(0).gt(0).any():
+        fig.update_yaxes(type='log', row=2, col=1)
 
     # Leave hover formatting to Plotly defaults so the hover shows date and time exactly as provided by the data
 

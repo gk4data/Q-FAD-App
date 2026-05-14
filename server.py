@@ -75,6 +75,7 @@ def define_server(input, output, session):
     live_trading_enabled = reactive.Value(False)
     live_trading_mode = reactive.Value(None)
     live_fetch_enabled = reactive.Value(False)
+    live_fetch_generation = reactive.Value(0)
     websocket_csv_enabled = reactive.Value(False)
     ltpc_csv_enabled = reactive.Value(False)
     websocket_last_processed_counter = reactive.Value(0)
@@ -1653,6 +1654,17 @@ def define_server(input, output, session):
         return True
 
     def _live_fetch_once():
+        run_generation = live_fetch_generation.get()
+
+        def live_fetch_stopped():
+            return (
+                not live_fetch_enabled.get()
+                or run_generation != live_fetch_generation.get()
+            )
+
+        if live_fetch_stopped():
+            return
+
         if not token.get():
             live_status_msg.set("[ERROR] Authenticate first before live fetch")
             return
@@ -1668,6 +1680,10 @@ def define_server(input, output, session):
             raw_df = fetch_intraday_data(
                 inst, token.get(), interval=interval, mode="intraday"
             )
+            if live_fetch_stopped():
+                live_status_msg.set("[INFO] Live fetch stopped")
+                return
+
             if raw_df is None or raw_df.empty:
                 live_status_msg.set("[WARN] Live fetch returned no data")
                 return
@@ -1682,12 +1698,19 @@ def define_server(input, output, session):
             raw_df = concatenate_with_previous_day(
                 raw_df, inst, token.get(), target_date_str, interval=interval, mode="date_range"
             )
+            if live_fetch_stopped():
+                live_status_msg.set("[INFO] Live fetch stopped")
+                return
 
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
             df = add_long_signal(df, expiry_date=input.select_expiry())
             df = filter_to_current_day(df, target_date_str)
+            if live_fetch_stopped():
+                live_status_msg.set("[INFO] Live fetch stopped")
+                return
+
             df_data.set(df.copy())
             try:
                 last_ts = df["Date"].max()
@@ -1734,12 +1757,14 @@ def define_server(input, output, session):
     @reactive.effect
     @reactive.event(input.start_live_data)
     def _start_live():
+        live_fetch_generation.set(live_fetch_generation.get() + 1)
         live_fetch_enabled.set(True)
         _live_fetch_once()
 
     @reactive.effect
     @reactive.event(input.stop_live_data)
     def _stop_live():
+        live_fetch_generation.set(live_fetch_generation.get() + 1)
         live_fetch_enabled.set(False)
         live_status_msg.set("[INFO] Live fetch stopped")
 
@@ -2094,30 +2119,37 @@ def define_server(input, output, session):
         latest_ts = pd.to_datetime(df["Date"], errors="coerce").max() if "Date" in df.columns else None
         if ts_val is None or pd.isna(ts_val):
             return
-        if last_traded_ts.get() == ts_val:
-            return
-        last_traded_ts.set(ts_val)
+        buy_signal_columns = [
+            'Buy_Signal',
+            'Mid_Buy_Signal',
+            'Mid_Buy_Signal_2',
+            'OverSold_Buy_Signal',
+            'RSI_Range_Buy_Signal',
+            'Super_Low_Buy_Signal',
+            'Super_Low_Buy_Signal_2',
+            'condition_supreme_low_crossover',
+            'condition_ema_bbu_crossover',
+            'New_Uptrend_Buy_Signal',
+            'Downtrend_Reverse_Buy_Signal',
+            'RSI_pct_buy',
+        ]
 
-        buy_signal = (
-            bool(last_row.get('Buy_Signal', False)) or
-            bool(last_row.get('Mid_Buy_Signal', False)) or
-            bool(last_row.get('Mid_Buy_Signal_2', False)) or
-            bool(last_row.get('OverSold_Buy_Signal', False)) or
-            bool(last_row.get('RSI_Range_Buy_Signal', False)) or
-            bool(last_row.get('Super_Low_Buy_Signal', False)) or 
-            bool(last_row.get('Super_Low_Buy_Signal_2', False)) or 
-            bool(last_row.get('condition_supreme_low_crossover', False)) or
-            bool(last_row.get('New_Uptrend_Buy_Signal', False)) or
-            bool(last_row.get('Downtrend_Reverse_Buy_Signal', False)) or 
-            bool(last_row.get('RSI_pct_buy', False))
-        )
-        sell_signal = bool(last_row.get("Sell_Signal", False))
+        def _signal_is_true(value):
+            return pd.notna(value) and bool(value)
+
+        active_buy_signals = [
+            col for col in buy_signal_columns
+            if _signal_is_true(last_row.get(col, False))
+        ]
+        buy_signal = bool(active_buy_signals)
+        sell_signal = _signal_is_true(last_row.get("Sell_Signal", False))
         logger.info(
-            "Live trading check: selected=%s latest=%s buy=%s sell=%s",
+            "Live trading check: selected=%s latest=%s buy=%s sell=%s active_buy=%s",
             ts_val,
             latest_ts,
             buy_signal,
             sell_signal,
+            active_buy_signals,
         )
         signal_key = f"{ts_val}-{int(buy_signal)}-{int(sell_signal)}"
         if last_signal_key.get() == signal_key:

@@ -113,8 +113,12 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     c4 = first_pos + 3
     c5 = first_pos + 4
     c930 = first_pos + 14  # 9:30 is 15 minutes after 9:15, so +14 from the first candle (0-based index)
+    false_series = pd.Series(False, index=df.index)
+    has_c3 = c3 < len(df)
+    has_c4 = c4 < len(df)
+    has_c930 = c930 < len(df)
 
-    if c4 < len(df):
+    if has_c4:
         green_continuation = (
             (first_volume_profile == 0) and
             (df.iloc[c2]['volume_profile'] == 1) and
@@ -135,12 +139,15 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         & (df['volume_profile'].shift(-2) == 0)
     )
 
-    triple_bbu_exhaustion = (
-        (df.iloc[c1]['Close'] > df.iloc[c1]['BBU'])
-        & (df.iloc[c2]['Close'] > df.iloc[c2]['BBU'])
-        & (df.iloc[c3]['Close'] > df.iloc[c3]['BBU'])
-        & (((first_high - first_low) / first_high) * 100 >= 35)
-        & (first_volume_profile == 1) &  (df.iloc[c2]['volume_profile'] == 1) & (df.iloc[c3]['volume_profile'] == 1))
+    triple_bbu_exhaustion = false_series
+    if has_c3:
+        triple_bbu_exhaustion = pd.Series((
+            (df.iloc[c1]['Close'] > df.iloc[c1]['BBU'])
+            & (df.iloc[c2]['Close'] > df.iloc[c2]['BBU'])
+            & (df.iloc[c3]['Close'] > df.iloc[c3]['BBU'])
+            & (((first_high - first_low) / first_high) * 100 >= 35)
+            & (first_volume_profile == 1) &  (df.iloc[c2]['volume_profile'] == 1) & (df.iloc[c3]['volume_profile'] == 1)
+        ), index=df.index)
 
     no_trade_gap_up_red = gap_up_three_red_reversal 
     no_trade_at_huge_gap_up = triple_bbu_exhaustion
@@ -151,20 +158,27 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                           & (df['volume_profile'].shift(-2) == 0)
                           & ((df['volume_profile'].shift(-3) == 0) | (df['volume_profile'].shift(-4) == 0)))
     
-    no_trade__on_gap_up_red = ((first_high > first_bbu) & (first_low < first_bbl)
-                          & (((first_high - first_low) / first_high) * 100 >= 45)
-                          & (first_volume_profile == 1)
-                          & (df.iloc[c2]['volume_profile'] == 0) & (df.iloc[c3]['volume_profile'] == 0))
+    no_trade__on_gap_up_red = false_series
+    if has_c3:
+        no_trade__on_gap_up_red = pd.Series((
+            (first_high > first_bbu) & (first_low < first_bbl)
+            & (((first_high - first_low) / first_high) * 100 >= 45)
+            & (first_volume_profile == 1)
+            & (df.iloc[c2]['volume_profile'] == 0) & (df.iloc[c3]['volume_profile'] == 0)
+        ), index=df.index)
     
-    no_trade_huge_opening = ((((df.iloc[c930]['BBU'] - df.iloc[c1]['BBU'])/ df.iloc[c930]['BBU']) * 100 > 40)
-                            & (df.iloc[c1]['High'] > df.iloc[c1]['BBU'])
-                            & (df.iloc[c2]['High'] > df.iloc[c2]['BBU'])
-                            & (df.iloc[c3]['High'] > df.iloc[c3]['BBU'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
+    no_trade_huge_opening = false_series
+    no_trade_huge_down = false_series
+    if has_c3 and has_c930:
+        no_trade_huge_opening = ((((df.iloc[c930]['BBU'] - df.iloc[c1]['BBU'])/ df.iloc[c930]['BBU']) * 100 > 40)
+                                & (df.iloc[c1]['High'] > df.iloc[c1]['BBU'])
+                                & (df.iloc[c2]['High'] > df.iloc[c2]['BBU'])
+                                & (df.iloc[c3]['High'] > df.iloc[c3]['BBU'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
 
-    no_trade_huge_down = ((((df.iloc[c1]['BBU'] - df.iloc[c930]['BBU'])/ df.iloc[c1]['BBU']) * 100 > 50)
-                            & (df.iloc[c1]['Low'] < df.iloc[c1]['BBL'])
-                            & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL'])
-                            & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
+        no_trade_huge_down = ((((df.iloc[c1]['BBU'] - df.iloc[c930]['BBU'])/ df.iloc[c1]['BBU']) * 100 > 50)
+                                & (df.iloc[c1]['Low'] < df.iloc[c1]['BBL'])
+                                & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL'])
+                                & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
     
     # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
     no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
@@ -558,23 +572,31 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     .max()
     .astype(bool))
     
-    triple_bbu__red_exhaustion = (
-        (df.iloc[c1]['High'] > df.iloc[c1]['BBU']) & (df.iloc[c2]['Close'] < df.iloc[c2]['BBU']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
-        & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9'])
-        & (((first_high - first_low) / first_high) * 100 >= 40)
-        & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & (df.iloc[c3]['volume_profile'] == 0))
+    triple_bbu__red_exhaustion = false_series
+    if has_c3:
+        triple_bbu__red_exhaustion = pd.Series((
+            (df.iloc[c1]['High'] > df.iloc[c1]['BBU']) & (df.iloc[c2]['Close'] < df.iloc[c2]['BBU']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
+            & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9'])
+            & (((first_high - first_low) / first_high) * 100 >= 40)
+            & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & (df.iloc[c3]['volume_profile'] == 0)
+        ), index=df.index)
     
-    triple_bbl__red_exhaustion = (
-        (df.iloc[c1]['Close'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Close'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
-        & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9'])
-        & ((((df.iloc[c1]['VWAP']) - (df.iloc[c2]['Low'])) / (df.iloc[c1]['VWAP'])) * 100 >= 45)
-        & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & ((df.iloc[c3]['volume_profile'] == 0) | (df.iloc[c4]['volume_profile'] == 0))
-        ) | (
-        (df.iloc[c1]['Low'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
-        & (df.iloc[c1]['Open'] > df.iloc[c1]['BBU']) & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9']) 
-        & ((((df.iloc[c1]['High']) - (df.iloc[c1]['Low'])) / (df.iloc[c1]['High'])) * 100 >= 33)
-        & ((((df.iloc[c1]['Open']) - (df.iloc[c1]['BBU'])) / (df.iloc[c1]['Open'])) * 100 >= 25)
-        & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & ((df.iloc[c3]['volume_profile'] == 0) | (df.iloc[c4]['volume_profile'] == 0)))
+    triple_bbl__red_exhaustion = false_series
+    if has_c4:
+        triple_bbl__red_exhaustion = pd.Series((
+            (
+                (df.iloc[c1]['Close'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Close'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
+                & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9'])
+                & ((((df.iloc[c1]['VWAP']) - (df.iloc[c2]['Low'])) / (df.iloc[c1]['VWAP'])) * 100 >= 45)
+                & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & ((df.iloc[c3]['volume_profile'] == 0) | (df.iloc[c4]['volume_profile'] == 0))
+            ) | (
+                (df.iloc[c1]['Low'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
+                & (df.iloc[c1]['Open'] > df.iloc[c1]['BBU']) & (df.iloc[c3]['Close'] < df.iloc[c3]['BBM']) & (df.iloc[c3]['Close'] < df.iloc[c3]['EMA9'])
+                & ((((df.iloc[c1]['High']) - (df.iloc[c1]['Low'])) / (df.iloc[c1]['High'])) * 100 >= 33)
+                & ((((df.iloc[c1]['Open']) - (df.iloc[c1]['BBU'])) / (df.iloc[c1]['Open'])) * 100 >= 25)
+                & (first_volume_profile == 0) & (df.iloc[c2]['volume_profile'] == 0) & ((df.iloc[c3]['volume_profile'] == 0) | (df.iloc[c4]['volume_profile'] == 0))
+            )
+        ), index=df.index)
           
     trading_day = df["Date"].dt.date
     prior_bbm_above_ema = (df["BBM"] > df["EMA9"])

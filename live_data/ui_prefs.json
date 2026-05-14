@@ -1,8 +1,8 @@
 {
   "exchange": "NSE",
   "auto_load_instruments": true,
-  "select_type": "CE",
-  "instrument": "NSE_FO|51354",
+  "select_type": "PE",
+  "instrument": "NSE_FO|51355",
   "interval": "1minute",
   "fetch_mode": "intraday",
   "start_date": "2026-05-13",
