@@ -662,6 +662,20 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                 &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05)
                 & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50))
     
+    alt_sell = (((((df['RSI_hi'].shift(1) < df['RSI'].shift(1)) | (df['RSI_hi'].shift(2) < df['RSI'].shift(2)))
+                   & (df['RSI_hi'] > df['RSI']) & (df['RSI_pct']*100 < df['RSI']) & (df['Low'].shift(1) > df['Low']) 
+                   & (df['Low'].shift(2) > df['Low']) & (df['volume_profile'] == 0) & (df['EMA9'] > df['Low']) & (df['MFI_pct']*100 <= 50))
+                | (((df['RSI_hi'].shift(1) > df['RSI'].shift(1)) | (df['RSI_hi'].shift(2) > df['RSI'].shift(2))) & (df['EMA9'] > df['Low'])
+                   & ((df['BBM'] > df['Low']) & ((((df['BBM']) - df['Low']) / df['BBM'])*100 > 0.66))
+                   & ((df['Close'] < df['BBM']) | (df['Close'] < df['EMA9'])) & (df['MFI_pct']*100 <= 50)
+                   & ((((df['RSI_hi'].shift(1) - df['RSI'].shift(1))/ df['RSI_hi'].shift(1))*100 <= 6) | (((df['RSI_hi'].shift(2) - df['RSI'].shift(2))/ df['RSI_hi'].shift(2))*100 <= 6))
+                   & (df['volume_profile'] == 0) & (df['Low'] < df['Low'].shift(1)) & (df['Close'] < df['Close'].shift(1))) 
+                | (((df['RSI_hi'].shift(1) < df['RSI'].shift(1)) | (df['RSI_hi'].shift(2) < df['RSI'].shift(2)))) & (df['RSI_hi'] > df['RSI'])
+                   & (df['Low'].shift(1) > df['Low']) & (df['Low'].shift(2) > df['Low']) & (df['volume_profile'] == 0) & (df['EMA9'] > df['Close'])
+                   & (df['Trend'] == 'Uptrend') & (df['EMA_Trend'] == 'Uptrend') & (df['BBU_Angle_Degree'] >= 190) & (df['EMA_Angle_Degree'] >= 190)
+                   & (((df['High'] - df['Low'])/df['High'])*100 >= 1)
+                )& (df['High'] < df['BBU']))                    
+    
     uptrend_sell = (((df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')) 
                                       & ((df['Low'].shift(1).rolling(window=6).mean() > df['Low']) | (df['Low'].shift(1).rolling(window=7).mean() > df['Low']))
                                       & ((df['BBU_Angle_Degree']) > (df['BBU_Angle_Degree'].shift(1)))
@@ -681,8 +695,15 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     & (df['Close'].shift(1) < df['Close']) & (df['volume_profile'].shift(1) == 1)
                                     & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 190) & ((df['EMA9'] > df['BBM']) | (df['BBU_Angle_Degree'] <= 160))
                                     & (df['EMA_Angle_Degree'] < 170)
-                                )        
-    
+                                )
+
+    alt_sell_heppened_recently = ((alt_sell.shift(2, fill_value=False) | alt_sell.shift(1, fill_value=False))
+                                    & ((df['High'] > df['High'].shift(1)) | (df['High'] > df['High'].shift(2))) 
+                                    & (df['Close'].shift(1) < df['Close']) & ((df['EMA9'] > df['BBM']))
+                                    & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 150) 
+                                    & (df['EMA_Angle_Degree'] < 170) & (df['BBL_Angle_Degree'] <= 150) 
+                                )
+        
     condition_ema_bbu_crossover = ( 
                                     ((df['EMA9'] > df['BBM']) & (df['BBU_Angle_Degree'] >= 100) ## ema crossing at BBU at opening or major trend change with vwap crossing ema9
                                     & ((df['EMA9'].shift(1) <= df['BBM'].shift(1)) | (df['EMA9'].shift(2) <= df['BBM'].shift(2)) | (df['EMA9'].shift(3) <= df['BBM'].shift(3))
@@ -697,9 +718,11 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     | ### this need to be tested how its working 
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
                                     |
-                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
+                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13))
                                     |
                                     (uptrend_sell_heppened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
+                                    |
+                                    ((alt_sell_heppened_recently) & ~(no_trade_on_expiry_after_13)) #& (~unstable_candle))
                                     |
                                     # #ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm 
                                     #  #need to fix the sideways market condition for this setup as it can give false signal in sideways market with low angle of ema and bbm
