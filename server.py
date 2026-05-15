@@ -1980,23 +1980,63 @@ def define_server(input, output, session):
         return str(exc)
 
     def _place_order_safe(trade_client, token_val, payload):
+        """Place order with full request/response logging."""
         try:
-            return trade_client.place_order(token_val, payload)
+            logger.info("=== BROKER ORDER PLACEMENT REQUEST ===")
+            logger.info("Payload: %s", json.dumps(payload, indent=2, default=str))
+            
+            resp = trade_client.place_order(token_val, payload)
+            
+            logger.info("=== BROKER ORDER PLACEMENT RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            
+            return resp
         except Exception as exc:
             err = _extract_http_error_message(exc)
+            logger.error("=== BROKER ORDER PLACEMENT ERROR ===")
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
             return {"status": "error", "errors": [{"message": err}]}
 
     def _cancel_order_safe(trade_client, token_val, order_id):
+        """Cancel order with full request/response logging."""
         try:
-            return trade_client.cancel_order(token_val, order_id)
+            logger.info("=== BROKER ORDER CANCELLATION REQUEST ===")
+            logger.info("Order ID: %s", order_id)
+            
+            resp = trade_client.cancel_order(token_val, order_id)
+            
+            logger.info("=== BROKER ORDER CANCELLATION RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            
+            return resp
         except Exception as exc:
-            return {"status": "error", "errors": [{"message": _extract_http_error_message(exc)}]}
+            err = _extract_http_error_message(exc)
+            logger.error("=== BROKER ORDER CANCELLATION ERROR ===")
+            logger.error("Order ID: %s", order_id)
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
+            return {"status": "error", "errors": [{"message": err}]}
 
     def _exit_all_positions_safe(token_val, segment=None, tag=None):
+        """Exit all positions with full request/response logging."""
         try:
-            return client.exit_all_positions(token_val, segment=segment, tag=tag)
+            logger.info("=== BROKER EXIT ALL POSITIONS REQUEST ===")
+            logger.info("Segment: %s, Tag: %s", segment, tag)
+            
+            resp = client.exit_all_positions(token_val, segment=segment, tag=tag)
+            
+            logger.info("=== BROKER EXIT ALL POSITIONS RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            
+            return resp
         except Exception as exc:
-            return {"status": "error", "errors": [{"message": _extract_http_error_message(exc)}]}
+            err = _extract_http_error_message(exc)
+            logger.error("=== BROKER EXIT ALL POSITIONS ERROR ===")
+            logger.error("Segment: %s, Tag: %s", segment, tag)
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
+            return {"status": "error", "errors": [{"message": err}]}
 
     def _round_to_tick(value, tick_size):
         try:
@@ -2025,29 +2065,59 @@ def define_server(input, output, session):
         # For SELL SL (limit), keep limit just below trigger.
         limit_price = _round_to_tick(max(float(sl_trigger) - float(tick_size), float(tick_size)), tick_size)
         payload["price"] = limit_price
+        
+        logger.debug("=== STOP LOSS PAYLOAD BUILT ===")
+        logger.debug("Instrument: %s, Qty: %s, Product: %s", inst, qty, product)
+        logger.debug("SL Trigger: %s, Limit Price: %s, Tick: %s", sl_trigger, limit_price, tick_size)
+        logger.debug("Full Payload: %s", json.dumps(payload, indent=2, default=str))
+        
         return payload
 
     def _place_stop_loss_order(trade_client, token_val, inst, qty, product, sl_trigger, tick_size):
+        """Place stop loss order with full logging."""
+        logger.info("=== STOP LOSS ORDER PLACEMENT INITIATED ===")
+        logger.info("Instrument: %s, Qty: %s, SL Trigger: %s", inst, qty, sl_trigger)
+        
         payload = _build_sl_payload(inst, qty, product, sl_trigger, tick_size)
         resp = _place_order_safe(trade_client, token_val, payload)
+        
+        logger.info("=== STOP LOSS ORDER PLACEMENT COMPLETED ===")
+        logger.info("Status: %s", resp.get("status", "unknown"))
+        
         return resp, "SL"
 
     def _fetch_order_fill(order_id, access_token):
+        """Fetch order fill details with logging."""
         try:
+            logger.debug("=== FETCHING ORDER FILL ===")
+            logger.debug("Order ID: %s", order_id)
+            
             payload = client.get_order_history(access_token, order_id)
-        except Exception:
+            
+            logger.debug("Order history response: %s", json.dumps(payload, indent=2, default=str))
+            
+        except Exception as exc:
+            logger.warning("Failed to fetch order fill for %s: %s", order_id, exc)
             return None, None, None
+        
         data = (payload or {}).get("data", [])
         if not data:
+            logger.warning("No order history data found for order %s", order_id)
             return None, None, None
+        
         last = data[-1]
         avg_price = last.get("average_price")
         status = (last.get("status") or "").lower()
         filled_qty = last.get("filled_quantity")
+        
         try:
             avg_price = float(avg_price) if avg_price is not None else None
         except Exception:
             avg_price = None
+        
+        logger.info("Order fill details - Order ID: %s, Status: %s, Avg Price: %s, Filled Qty: %s", 
+                   order_id, status, avg_price, filled_qty)
+        
         return avg_price, status, filled_qty
 
     def _broker_open_position_qty(inst: str, access_token: str):
@@ -2339,7 +2409,12 @@ def define_server(input, output, session):
 
                 exit_id = None
                 exit_ok = False
-                if is_production:
+                product_type_for_exit = state.get("product") or product_type
+                
+                # For MIS (intraday/margin) orders, use exit_all_positions API
+                # For CNC (delivery) orders, skip exit_all and go directly to SELL order (no margin needed)
+                if is_production and product_type_for_exit.upper() in ("MIS", "INTRADAY"):
+                    logger.info("=== EXIT POSITION INITIATED (MIS/INTRADAY) ===")
                     segment = ""
                     try:
                         segment = str(inst).split("|", 1)[0]
@@ -2350,13 +2425,23 @@ def define_server(input, output, session):
                     if exit_all_resp.get("status") in {"success", "partial_success"}:
                         exit_ids = exit_all_resp.get("data", {}).get("order_ids", []) if isinstance(exit_all_resp.get("data"), dict) else []
                         exit_id = exit_ids[0] if exit_ids else None
-                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, exit_id, "success", f"Exit-all placed: {exit_id}")
+                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, exit_id, "success", f"Exit-all placed (MIS): {exit_id}")
                         exit_ok = True
                     else:
                         error_msg = exit_all_resp.get("errors", [{}])[0].get("message", exit_all_resp.get("message", "Unknown error"))
-                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, None, "error", f"Exit-all failed: {error_msg}")
+                        logger.warning("Exit-all failed for MIS position, falling back to SELL order: %s", error_msg)
+                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, None, "error", f"Exit-all (MIS) failed: {error_msg}")
+                elif is_production and product_type_for_exit.upper() in ("CNC", "DELIVERY"):
+                    logger.info("=== EXIT POSITION INITIATED (CNC/DELIVERY) ===")
+                    logger.info("Product is CNC: skipping exit_all_positions, will use regular SELL order (no margin check)")
+                    exit_ok = False  # Force fallback to SELL order for CNC
 
                 if not exit_ok:
+                    # For CNC: Regular SELL order from holdings (no margin check - you own the shares)
+                    # For MIS: Fallback SELL order if exit_all_positions failed (will check margin if needed)
+                    logger.info("=== PLACING SELL ORDER FOR EXIT ===")
+                    logger.info("Product: %s, Qty: %s (no margin validation for CNC)", product_type_for_exit, state.get("qty"))
+                    
                     exit_payload = {
                         "quantity": state.get("qty"),
                         "product": state.get("product") or product_type,
