@@ -186,6 +186,12 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     no_trade_huge_opening_at_all = bool(no_trade_huge_opening.any())
     no_trade_huge_down_at_all = bool(no_trade_huge_down.any())
 
+   # time windows for applying each checkpoint rule
+    t0_window = (df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time <= pd.to_datetime('10:14:00').time())
+    t1_window = (df['Date'].dt.time > pd.to_datetime('10:14:00').time()) & (df['Date'].dt.time <= pd.to_datetime('11:59:00').time())
+    t2_window = (df['Date'].dt.time > pd.to_datetime('11:59:00').time()) & (df['Date'].dt.time <= pd.to_datetime('13:59:00').time())
+    t3_window = (df['Date'].dt.time > pd.to_datetime('13:59:00').time())
+
     # Reactivation override: if price reclaims VWAP after two closes below VWAP,
     # disable the gap-up-red hard block and let other gates decide trading.
     trading_day = df.loc[first_idx, 'Date'].date()
@@ -198,18 +204,39 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         trading_day_mask
     )
 
-    effective_no_trade_gap_up_red_at_all = (
-        (no_trade_gap_up_red_at_all or no_trade_at_huge_gap_up_at_all or no_trade_gap_down_green_at_all 
-         or no_trade_gap_up_red_1_at_all or no_trade_huge_opening_at_all or no_trade_huge_down_at_all) #& (~reactivate_after_vwap_cross)
-    )
-
     allow_basic = (no_trade_at_all_close | no_trade_at_all_highlow | green_continuation)  # scalar
 
-   # time windows for applying each checkpoint rule
-    t0_window = (df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time <= pd.to_datetime('10:14:00').time())
-    t1_window = (df['Date'].dt.time > pd.to_datetime('10:14:00').time()) & (df['Date'].dt.time <= pd.to_datetime('11:59:00').time())
-    t2_window = (df['Date'].dt.time > pd.to_datetime('11:59:00').time()) & (df['Date'].dt.time <= pd.to_datetime('13:59:00').time())
-    t3_window = (df['Date'].dt.time > pd.to_datetime('13:59:00').time())
+    # If the upper band has recovered above the opening BBU by t1 and is still
+    # expanding into t2, release the gap-up hard blocks only from t2 onward.
+    bbu_restarts_gap_up_trade_t2 = bool(
+        (df['BBU'].iloc[idx_t1] > first_bbu)
+        and
+        (df['BBU'].iloc[idx_t1] < df['BBU'].iloc[idx_t2])
+        and 
+        (((df['BBU'].iloc[idx_t2] - first_bbu)/ df['BBU'].iloc[idx_t2]) * 100 > 50)
+    )
+    restart_gap_up_trade_after_t2 = (
+        (t2_window | t3_window) if bbu_restarts_gap_up_trade_t2 else false_series
+    )
+
+    releasable_gap_up_hard_block = (
+        no_trade_gap_up_red_at_all
+        or no_trade_at_huge_gap_up_at_all
+        or no_trade_gap_up_red_1_at_all
+        or no_trade_huge_opening_at_all
+    )
+    persistent_hard_block = (
+        no_trade_gap_down_green_at_all
+        or no_trade_huge_down_at_all
+    )
+    effective_no_trade_gap_up_red_block = (
+        (releasable_gap_up_hard_block and (~restart_gap_up_trade_after_t2))
+        | persistent_hard_block
+    )
+    effective_crossover_no_trade_block = (
+        ((no_trade_gap_up_red_1_at_all or no_trade_huge_opening_at_all) and (~restart_gap_up_trade_after_t2))
+        | no_trade_huge_down_at_all
+    )
 
    # no-trade if vwap failing in respective windows (Series)
     no_trade_if_vwap_fail = (
@@ -282,7 +309,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     base_allowed_trade_series = (
       ((allow_basic & t0_window) | trade_if_vwap_back_series)
       & (~(no_trade_if_vwap_fail))
-      & (~effective_no_trade_gap_up_red_at_all)
+      & (~effective_no_trade_gap_up_red_block)
       #& (~unstable_opening_gate)
     )
 
@@ -870,7 +897,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & (df["BBU"] < df["High"])
                                     & (df['BBU_Angle_Degree'] > 100)
                                     )
-    ) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
+    ) & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)
 
      ## supreme low signal condition with heavy dropdown and then curvy upside
     condition_supreme_low_crossover = (((df['BBU_Angle_Degree'].shift(1).rolling(window=7).mean() > 235) 
@@ -901,7 +928,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      | (((condition_downtrend_reverse.shift(1)) | (condition_downtrend_reverse.shift(2))) 
                                      & (df['EMA_Angle_Degree'] < 175) & (df['volume_profile'] == 1) & (df['EMA_Angle_Degree'] < df['EMA_Angle_Degree'].shift(1))
                                      & ((df["High"] > df["High"].shift(1)) | (df["High"] > df["High"].shift(2))))
-                                     ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
+                                     ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)
     
     df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
     df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover &  (df['Date'].dt.time >= pd.to_datetime('09:25:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
