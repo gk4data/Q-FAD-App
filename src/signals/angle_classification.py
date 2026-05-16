@@ -20,7 +20,7 @@ def classify_trend_by_angles(
       'pure_up','pure_down','up_trend_mixed','down_trend_mixed','trend_mixed')
     """
 
-    out = df.copy().reset_index(drop=True)
+    out = df.reset_index(drop=True)
     n = len(out)
     if n == 0:
         out['trend_regime_angles'] = []

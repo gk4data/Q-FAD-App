@@ -3,7 +3,6 @@ import numpy as np
 import pandas_ta as ta
 
 def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
     # Ensure Date column is datetime dtype to avoid pandas comparison FutureWarnings
     if 'Date' in df.columns:
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')

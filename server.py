@@ -5,6 +5,7 @@ import json
 import logging
 import traceback
 import tempfile
+import time
 import requests
 import pandas as pd
 import numpy as np
@@ -31,6 +32,7 @@ from src.signals.angle_classification import classify_trend_by_angles
 from src.signals.generator import add_long_signal
 from src.data.save_results import save_to_csv
 from src.data.live_data_feed import LiveDataRecorder
+from src.data.live_data_ltpc_feed import LTPCDataRecorder
 from src.viz.plot_signals import plot_signals
 from src.viz.plot_backtest import plot_backtest_overview
 from src.backtest.backtest_engine import calculate_manual_pnl, get_summary_stats_manual
@@ -55,6 +57,7 @@ def define_server(input, output, session):
     instrument_manager = InstrumentManager()
     sandbox_client = UpstoxSandboxClient()
     live_recorder = LiveDataRecorder()
+    ltpc_recorder = LTPCDataRecorder()
 
     # ===== Reactive State =====
     token = reactive.Value(None)
@@ -68,13 +71,18 @@ def define_server(input, output, session):
     funds_available = reactive.Value(None)
     live_status_msg = reactive.Value("[INFO] Live data idle")
     websocket_status_msg = reactive.Value("[INFO] WebSocket idle")
+    ltpc_status_msg = reactive.Value("[INFO] LTPC live data idle")
     trade_status_msg = reactive.Value("[INFO] Live trading idle")
     live_trading_enabled = reactive.Value(False)
     live_trading_mode = reactive.Value(None)
     live_fetch_enabled = reactive.Value(False)
+    live_fetch_generation = reactive.Value(0)
     websocket_csv_enabled = reactive.Value(False)
+    ltpc_csv_enabled = reactive.Value(False)
     websocket_last_processed_counter = reactive.Value(0)
+    ltpc_last_processed_counter = reactive.Value(0)
     websocket_chart_tick = reactive.Value(0)
+    ltpc_chart_tick = reactive.Value(0)
     last_signal_key = reactive.Value(None)
     last_traded_ts = reactive.Value(None)
     order_history_data = reactive.Value(pd.DataFrame())
@@ -691,6 +699,11 @@ def define_server(input, output, session):
 
     @output
     @render.text
+    def ltpc_status():
+        return ltpc_status_msg.get()
+
+    @output
+    @render.text
     def trade_status():
         pnl_total = _get_total_pnl()
         if pnl_total is None:
@@ -1220,6 +1233,23 @@ def define_server(input, output, session):
             traceback.print_exc()
 
     @reactive.effect
+    @reactive.event(input.use_access_token)
+    def _use_access_token():
+        raw_token = input.access_token()
+        if not raw_token or raw_token.strip() == "":
+            status_msg.set("[ERROR] Please provide a valid access token")
+            return
+        tkn = raw_token.strip()
+        token.set(tkn)
+        if client.token_manager:
+            try:
+                client.token_manager.save_token(tkn)
+            except Exception as exc:
+                logger.warning("Failed to cache manual access token: %s", exc)
+        status_msg.set("[OK] Access token set and cached.")
+        _refresh_funds()
+
+    @reactive.effect
     @reactive.event(input.clear_cache)
     def _clear_cache():
         if client.token_manager:
@@ -1563,11 +1593,102 @@ def define_server(input, output, session):
         reactive.invalidate_later(2)
         websocket_status_msg.set(live_recorder.status())
 
+    @reactive.effect
+    def _poll_ltpc_status():
+        reactive.invalidate_later(2)
+        ltpc_status_msg.set(ltpc_recorder.status())
+
     def _get_websocket_csv_path():
         base_dir = os.path.join(os.getcwd(), "live_data")
         return os.path.join(base_dir, "live_data_websocket.csv")
 
+    def _get_ltpc_csv_path():
+        base_dir = os.path.join(os.getcwd(), "live_data")
+        return os.path.join(base_dir, "live_data_ltpc.csv")
+
+    def _build_live_processing_window(df, target_date_str, previous_rows=60):
+        if df is None or df.empty:
+            return df
+
+        work = df.sort_values("Date").reset_index(drop=True)
+        try:
+            target_date = _dt.strptime(target_date_str, "%Y-%m-%d").date()
+        except Exception:
+            return work
+
+        date_series = work["Date"].dt.date
+        current_day = work.loc[date_series == target_date]
+        if current_day.empty:
+            return work
+
+        previous_day = work.loc[date_series < target_date].tail(previous_rows)
+        if previous_day.empty:
+            return current_day.reset_index(drop=True)
+
+        return pd.concat([previous_day, current_day], ignore_index=True)
+
+    def _process_live_csv_path(path, source_name):
+        if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+            return False
+
+        try:
+            raw_df = pd.read_csv(path)
+        except Exception as exc:
+            logger.warning("%s CSV read error: %s", source_name, exc)
+            return False
+
+        required = {"timestamp", "open", "high", "low", "close", "volume"}
+        if not required.issubset(set(raw_df.columns)):
+            logger.warning("%s CSV missing columns: %s", source_name, sorted(required - set(raw_df.columns)))
+            return False
+
+        df = raw_df
+        df["Date"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        if getattr(df["Date"].dt, "tz", None) is not None:
+            df["Date"] = df["Date"].dt.tz_localize(None)
+        df.rename(
+            columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume",
+            },
+            inplace=True,
+        )
+        df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Date"])
+        df = df.sort_values("Date").reset_index(drop=True)
+        if df.empty:
+            return False
+
+        target_date_str = _as_iso(_dt.now().date())
+        df = _build_live_processing_window(df, target_date_str, previous_rows=60)
+
+        df = calculate_indicators(df)
+        df = detect_regimes_relaxed(df)
+        df = classify_trend_by_angles(df)
+        has_915 = (df["Date"].dt.time == _dt.strptime("09:15:00", "%H:%M:%S").time()).any()
+        if has_915:
+            df = add_long_signal(df, expiry_date=input.select_expiry())
+        else:
+            logger.warning("%s CSV: skipping signals (no 09:15 candle found)", source_name)
+        df = filter_to_current_day(df, target_date_str)
+        df_data.set(df)
+        _maybe_execute_trade(df)
+        return True
+
     def _live_fetch_once():
+        run_generation = live_fetch_generation.get()
+
+        def live_fetch_stopped():
+            return (
+                not live_fetch_enabled.get()
+                or run_generation != live_fetch_generation.get()
+            )
+
+        if live_fetch_stopped():
+            return
+
         if not token.get():
             live_status_msg.set("[ERROR] Authenticate first before live fetch")
             return
@@ -1583,6 +1704,10 @@ def define_server(input, output, session):
             raw_df = fetch_intraday_data(
                 inst, token.get(), interval=interval, mode="intraday"
             )
+            if live_fetch_stopped():
+                live_status_msg.set("[INFO] Live fetch stopped")
+                return
+
             if raw_df is None or raw_df.empty:
                 live_status_msg.set("[WARN] Live fetch returned no data")
                 return
@@ -1597,13 +1722,20 @@ def define_server(input, output, session):
             raw_df = concatenate_with_previous_day(
                 raw_df, inst, token.get(), target_date_str, interval=interval, mode="date_range"
             )
+            if live_fetch_stopped():
+                live_status_msg.set("[INFO] Live fetch stopped")
+                return
 
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
             df = add_long_signal(df, expiry_date=input.select_expiry())
             df = filter_to_current_day(df, target_date_str)
-            df_data.set(df.copy())
+            if live_fetch_stopped():
+                live_status_msg.set("[INFO] Live fetch stopped")
+                return
+
+            df_data.set(df)
             try:
                 last_ts = df["Date"].max()
                 last_ts_str = (
@@ -1649,12 +1781,14 @@ def define_server(input, output, session):
     @reactive.effect
     @reactive.event(input.start_live_data)
     def _start_live():
+        live_fetch_generation.set(live_fetch_generation.get() + 1)
         live_fetch_enabled.set(True)
         _live_fetch_once()
 
     @reactive.effect
     @reactive.event(input.stop_live_data)
     def _stop_live():
+        live_fetch_generation.set(live_fetch_generation.get() + 1)
         live_fetch_enabled.set(False)
         live_status_msg.set("[INFO] Live fetch stopped")
 
@@ -1704,68 +1838,68 @@ def define_server(input, output, session):
                 return
 
             try:
-                raw_df = pd.read_csv(path)
-            except Exception as exc:
-                logger.warning("WebSocket CSV read error: %s", exc)
-                return
-
-            required = {"timestamp", "open", "high", "low", "close", "volume"}
-            if not required.issubset(set(raw_df.columns)):
-                logger.warning("WebSocket CSV missing columns: %s", sorted(required - set(raw_df.columns)))
-                return
-
-            df = raw_df.copy()
-            df["Date"] = pd.to_datetime(df["timestamp"], errors="coerce")
-            if getattr(df["Date"].dt, "tz", None) is not None:
-                df["Date"] = df["Date"].dt.tz_localize(None)
-            df.rename(
-                columns={
-                    "open": "Open",
-                    "high": "High",
-                    "low": "Low",
-                    "close": "Close",
-                    "volume": "Volume",
-                },
-                inplace=True,
-            )
-            df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Date"])
-            df = df.sort_values("Date").reset_index(drop=True)
-            if df.empty:
+                processed = _process_live_csv_path(path, "WebSocket")
                 websocket_last_processed_counter.set(live_save_counter)
-                return
-
-            target_date_str = _as_iso(_dt.now().date())
-            try:
-                inst = selected_instrument_key.get() or input.instrument().strip()
-                # If CSV already contains previous-day rows, skip concatenation
-                has_prev_day = False
-                try:
-                    min_date = df["Date"].dt.date.min()
-                    max_date = df["Date"].dt.date.max()
-                    target_date = _dt.strptime(target_date_str, "%Y-%m-%d").date()
-                    has_prev_day = (min_date is not None and max_date is not None and min_date < target_date <= max_date)
-                except Exception:
-                    has_prev_day = False
-                if inst and token.get() and not has_prev_day:
-                    df = concatenate_with_previous_day(
-                        df, inst, token.get(), target_date_str,
-                        interval="1minute", mode="date_range"
-                    )
-                df = calculate_indicators(df)
-                df = detect_regimes_relaxed(df)
-                df = classify_trend_by_angles(df)
-                has_915 = (df["Date"].dt.time == _dt.strptime("09:15:00", "%H:%M:%S").time()).any()
-                if has_915:
-                    df = add_long_signal(df, expiry_date=input.select_expiry())
-                else:
-                    logger.warning("WebSocket CSV: skipping signals (no 09:15 candle found)")
-                df = filter_to_current_day(df, target_date_str)
-                df_data.set(df.copy())
-                _maybe_execute_trade(df)
-                websocket_last_processed_counter.set(live_save_counter)
-                websocket_chart_tick.set(websocket_chart_tick.get() + 1)
+                if processed:
+                    websocket_chart_tick.set(websocket_chart_tick.get() + 1)
             except Exception as exc:
                 logger.exception("WebSocket CSV processing error: %s", exc)
+                return
+        finally:
+            reactive.invalidate_later(1)
+
+    @reactive.effect
+    @reactive.event(input.start_ltpc)
+    def _start_ltpc():
+        if not token.get():
+            ltpc_status_msg.set("[ERROR] Authenticate first before starting LTPC")
+            return
+
+        inst = selected_instrument_key.get() or input.instrument().strip()
+        if not inst:
+            ltpc_status_msg.set("[ERROR] Select an instrument before starting LTPC")
+            return
+
+        ok, message = ltpc_recorder.start(
+            token.get(), inst, None, mode="ltpc", save_interval=60
+        )
+        ltpc_status_msg.set("[OK] LTPC started" if ok else f"[ERROR] {message}")
+        if ok:
+            ltpc_csv_enabled.set(True)
+            ltpc_last_processed_counter.set(0)
+            df_data.set(pd.DataFrame())
+            ltpc_chart_tick.set(ltpc_chart_tick.get() + 1)
+
+    @reactive.effect
+    @reactive.event(input.stop_ltpc)
+    def _stop_ltpc():
+        ok, message = ltpc_recorder.stop()
+        ltpc_status_msg.set("[OK] LTPC stopped" if ok else f"[INFO] {message}")
+        ltpc_csv_enabled.set(False)
+        ltpc_last_processed_counter.set(0)
+
+    @reactive.effect
+    def _ltpc_csv_loop():
+        try:
+            if not ltpc_csv_enabled.get():
+                return
+            snapshot = ltpc_recorder.live_save_snapshot()
+            live_save_counter = int(snapshot.get("counter", 0) or 0)
+            if live_save_counter <= ltpc_last_processed_counter.get():
+                return
+
+            path = snapshot.get("last_save_path") or _get_ltpc_csv_path()
+            if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+                ltpc_last_processed_counter.set(live_save_counter)
+                return
+
+            try:
+                processed = _process_live_csv_path(path, "LTPC")
+                ltpc_last_processed_counter.set(live_save_counter)
+                if processed:
+                    ltpc_chart_tick.set(ltpc_chart_tick.get() + 1)
+            except Exception as exc:
+                logger.exception("LTPC CSV processing error: %s", exc)
                 return
         finally:
             reactive.invalidate_later(1)
@@ -1853,23 +1987,63 @@ def define_server(input, output, session):
         return str(exc)
 
     def _place_order_safe(trade_client, token_val, payload):
+        """Place order with full request/response logging."""
         try:
-            return trade_client.place_order(token_val, payload)
+            logger.info("=== BROKER ORDER PLACEMENT REQUEST ===")
+            logger.info("Payload: %s", json.dumps(payload, indent=2, default=str))
+            
+            resp = trade_client.place_order(token_val, payload)
+            
+            logger.info("=== BROKER ORDER PLACEMENT RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            
+            return resp
         except Exception as exc:
             err = _extract_http_error_message(exc)
+            logger.error("=== BROKER ORDER PLACEMENT ERROR ===")
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
             return {"status": "error", "errors": [{"message": err}]}
 
     def _cancel_order_safe(trade_client, token_val, order_id):
+        """Cancel order with full request/response logging."""
         try:
-            return trade_client.cancel_order(token_val, order_id)
+            logger.info("=== BROKER ORDER CANCELLATION REQUEST ===")
+            logger.info("Order ID: %s", order_id)
+            
+            resp = trade_client.cancel_order(token_val, order_id)
+            
+            logger.info("=== BROKER ORDER CANCELLATION RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            
+            return resp
         except Exception as exc:
-            return {"status": "error", "errors": [{"message": _extract_http_error_message(exc)}]}
+            err = _extract_http_error_message(exc)
+            logger.error("=== BROKER ORDER CANCELLATION ERROR ===")
+            logger.error("Order ID: %s", order_id)
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
+            return {"status": "error", "errors": [{"message": err}]}
 
     def _exit_all_positions_safe(token_val, segment=None, tag=None):
+        """Exit all positions with full request/response logging."""
         try:
-            return client.exit_all_positions(token_val, segment=segment, tag=tag)
+            logger.info("=== BROKER EXIT ALL POSITIONS REQUEST ===")
+            logger.info("Segment: %s, Tag: %s", segment, tag)
+            
+            resp = client.exit_all_positions(token_val, segment=segment, tag=tag)
+            
+            logger.info("=== BROKER EXIT ALL POSITIONS RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            
+            return resp
         except Exception as exc:
-            return {"status": "error", "errors": [{"message": _extract_http_error_message(exc)}]}
+            err = _extract_http_error_message(exc)
+            logger.error("=== BROKER EXIT ALL POSITIONS ERROR ===")
+            logger.error("Segment: %s, Tag: %s", segment, tag)
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
+            return {"status": "error", "errors": [{"message": err}]}
 
     def _round_to_tick(value, tick_size):
         try:
@@ -1898,30 +2072,113 @@ def define_server(input, output, session):
         # For SELL SL (limit), keep limit just below trigger.
         limit_price = _round_to_tick(max(float(sl_trigger) - float(tick_size), float(tick_size)), tick_size)
         payload["price"] = limit_price
+        
+        logger.debug("=== STOP LOSS PAYLOAD BUILT ===")
+        logger.debug("Instrument: %s, Qty: %s, Product: %s", inst, qty, product)
+        logger.debug("SL Trigger: %s, Limit Price: %s, Tick: %s", sl_trigger, limit_price, tick_size)
+        logger.debug("Full Payload: %s", json.dumps(payload, indent=2, default=str))
+        
         return payload
 
     def _place_stop_loss_order(trade_client, token_val, inst, qty, product, sl_trigger, tick_size):
+        """Place stop loss order with full logging."""
+        logger.info("=== STOP LOSS ORDER PLACEMENT INITIATED ===")
+        logger.info("Instrument: %s, Qty: %s, SL Trigger: %s", inst, qty, sl_trigger)
+        
         payload = _build_sl_payload(inst, qty, product, sl_trigger, tick_size)
         resp = _place_order_safe(trade_client, token_val, payload)
+        
+        logger.info("=== STOP LOSS ORDER PLACEMENT COMPLETED ===")
+        logger.info("Status: %s", resp.get("status", "unknown"))
+        
         return resp, "SL"
 
     def _fetch_order_fill(order_id, access_token):
+        """Fetch order fill details with logging."""
         try:
+            logger.debug("=== FETCHING ORDER FILL ===")
+            logger.debug("Order ID: %s", order_id)
+            
             payload = client.get_order_history(access_token, order_id)
-        except Exception:
+            
+            logger.debug("Order history response: %s", json.dumps(payload, indent=2, default=str))
+            
+        except Exception as exc:
+            logger.warning("Failed to fetch order fill for %s: %s", order_id, exc)
             return None, None, None
+        
         data = (payload or {}).get("data", [])
         if not data:
+            logger.warning("No order history data found for order %s", order_id)
             return None, None, None
+        
         last = data[-1]
         avg_price = last.get("average_price")
         status = (last.get("status") or "").lower()
         filled_qty = last.get("filled_quantity")
+        
         try:
             avg_price = float(avg_price) if avg_price is not None else None
         except Exception:
             avg_price = None
+        
+        logger.info("Order fill details - Order ID: %s, Status: %s, Avg Price: %s, Filled Qty: %s", 
+                   order_id, status, avg_price, filled_qty)
+        
         return avg_price, status, filled_qty
+
+    def _broker_open_position_qty(inst: str, access_token: str):
+        """Return broker-confirmed open quantity for instrument, or None if unavailable."""
+        if not inst or not access_token:
+            return None
+        try:
+            payload = client.get_positions(access_token)
+        except Exception as exc:
+            logger.warning("Broker position fetch failed for %s: %s", inst, exc)
+            return None
+
+        rows = (payload or {}).get("data", [])
+        if not isinstance(rows, list):
+            return None
+
+        qty_total = 0
+        found = False
+        for row in rows:
+            row_inst = str(
+                row.get("instrument_token")
+                or row.get("instrument_key")
+                or ""
+            ).strip()
+            if row_inst != str(inst).strip():
+                continue
+            found = True
+            raw_qty = row.get("quantity", row.get("net_quantity", 0))
+            try:
+                qty_total += int(float(raw_qty or 0))
+            except Exception:
+                continue
+
+        if not found:
+            return 0
+        return qty_total
+
+    def _clear_local_position_state(reason: str | None = None):
+        position_state.set({
+            "open": False,
+            "entry_order_id": None,
+            "sl_order_id": None,
+            "entry_price": None,
+            "entry_fill_price": None,
+            "qty": 0,
+            "instrument": None,
+            "product": None,
+            "sl_pct": None,
+            "sl_placed": False,
+            "sl_attempts": 0,
+            "sl_next_retry_ts": None,
+        })
+        if reason:
+            logger.info("Local position state cleared: %s", reason)
 
     def _select_latest_completed_candle(df: pd.DataFrame):
         """Return the latest completed 1-minute candle row and its timestamp."""
@@ -1945,7 +2202,7 @@ def define_server(input, output, session):
     def _maybe_execute_trade(df):
         if not live_trading_enabled.get():
             return
-        if not (live_fetch_enabled.get() or websocket_csv_enabled.get()):
+        if not (live_fetch_enabled.get() or websocket_csv_enabled.get() or ltpc_csv_enabled.get()):
             return
         if df is None or df.empty:
             return
@@ -1956,30 +2213,37 @@ def define_server(input, output, session):
         latest_ts = pd.to_datetime(df["Date"], errors="coerce").max() if "Date" in df.columns else None
         if ts_val is None or pd.isna(ts_val):
             return
-        if last_traded_ts.get() == ts_val:
-            return
-        last_traded_ts.set(ts_val)
+        buy_signal_columns = [
+            'Buy_Signal',
+            'Mid_Buy_Signal',
+            'Mid_Buy_Signal_2',
+            'OverSold_Buy_Signal',
+            'RSI_Range_Buy_Signal',
+            'Super_Low_Buy_Signal',
+            'Super_Low_Buy_Signal_2',
+            'condition_supreme_low_crossover',
+            'condition_ema_bbu_crossover',
+            'New_Uptrend_Buy_Signal',
+            'Downtrend_Reverse_Buy_Signal',
+            'RSI_pct_buy',
+        ]
 
-        buy_signal = (
-            bool(last_row.get('Buy_Signal', False)) or
-            bool(last_row.get('Mid_Buy_Signal', False)) or
-            bool(last_row.get('Mid_Buy_Signal_2', False)) or
-            bool(last_row.get('OverSold_Buy_Signal', False)) or
-            bool(last_row.get('RSI_Range_Buy_Signal', False)) or
-            bool(last_row.get('Super_Low_Buy_Signal', False)) or 
-            bool(last_row.get('Super_Low_Buy_Signal_2', False)) or 
-            bool(last_row.get('condition_supreme_low_crossover', False)) or
-            bool(last_row.get('New_Uptrend_Buy_Signal', False)) or
-            bool(last_row.get('Downtrend_Reverse_Buy_Signal', False)) or 
-            bool(last_row.get('RSI_pct_buy', False))
-        )
-        sell_signal = bool(last_row.get("Sell_Signal", False))
+        def _signal_is_true(value):
+            return pd.notna(value) and bool(value)
+
+        active_buy_signals = [
+            col for col in buy_signal_columns
+            if _signal_is_true(last_row.get(col, False))
+        ]
+        buy_signal = bool(active_buy_signals)
+        sell_signal = _signal_is_true(last_row.get("Sell_Signal", False))
         logger.info(
-            "Live trading check: selected=%s latest=%s buy=%s sell=%s",
+            "Live trading check: selected=%s latest=%s buy=%s sell=%s active_buy=%s",
             ts_val,
             latest_ts,
             buy_signal,
             sell_signal,
+            active_buy_signals,
         )
         signal_key = f"{ts_val}-{int(buy_signal)}-{int(sell_signal)}"
         if last_signal_key.get() == signal_key:
@@ -2122,6 +2386,24 @@ def define_server(input, output, session):
 
             if sell_signal:
                 state = position_state.get() or {}
+                broker_qty = None
+                if is_production:
+                    broker_qty = _broker_open_position_qty(inst, token_val)
+                    if broker_qty is not None and broker_qty <= 0:
+                        _append_order_log(
+                            "SKIP",
+                            inst,
+                            state.get("qty", 0),
+                            price,
+                            None,
+                            "info",
+                            "Sell blocked: broker shows no open position",
+                        )
+                        _clear_local_position_state("broker shows position already closed")
+                        trade_status_msg.set("[INFO] Sell blocked because broker shows no open position; local state reset")
+                        last_signal_key.set(signal_key)
+                        return
+
                 sl_id = state.get("sl_order_id")
                 if sl_id:
                     try:
@@ -2134,7 +2416,12 @@ def define_server(input, output, session):
 
                 exit_id = None
                 exit_ok = False
-                if is_production:
+                product_type_for_exit = state.get("product") or product_type
+                
+                # For MIS (intraday/margin) orders, use exit_all_positions API
+                # For CNC (delivery) orders, skip exit_all and go directly to SELL order (no margin needed)
+                if is_production and product_type_for_exit.upper() in ("MIS", "INTRADAY"):
+                    logger.info("=== EXIT POSITION INITIATED (MIS/INTRADAY) ===")
                     segment = ""
                     try:
                         segment = str(inst).split("|", 1)[0]
@@ -2145,13 +2432,23 @@ def define_server(input, output, session):
                     if exit_all_resp.get("status") in {"success", "partial_success"}:
                         exit_ids = exit_all_resp.get("data", {}).get("order_ids", []) if isinstance(exit_all_resp.get("data"), dict) else []
                         exit_id = exit_ids[0] if exit_ids else None
-                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, exit_id, "success", f"Exit-all placed: {exit_id}")
+                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, exit_id, "success", f"Exit-all placed (MIS): {exit_id}")
                         exit_ok = True
                     else:
                         error_msg = exit_all_resp.get("errors", [{}])[0].get("message", exit_all_resp.get("message", "Unknown error"))
-                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, None, "error", f"Exit-all failed: {error_msg}")
+                        logger.warning("Exit-all failed for MIS position, falling back to SELL order: %s", error_msg)
+                        _append_order_log("EXIT_ALL", inst, state.get("qty"), price, None, "error", f"Exit-all (MIS) failed: {error_msg}")
+                elif is_production and product_type_for_exit.upper() in ("CNC", "DELIVERY"):
+                    logger.info("=== EXIT POSITION INITIATED (CNC/DELIVERY) ===")
+                    logger.info("Product is CNC: skipping exit_all_positions, will use regular SELL order (no margin check)")
+                    exit_ok = False  # Force fallback to SELL order for CNC
 
                 if not exit_ok:
+                    # For CNC: Regular SELL order from holdings (no margin check - you own the shares)
+                    # For MIS: Fallback SELL order if exit_all_positions failed (will check margin if needed)
+                    logger.info("=== PLACING SELL ORDER FOR EXIT ===")
+                    logger.info("Product: %s, Qty: %s (no margin validation for CNC)", product_type_for_exit, state.get("qty"))
+                    
                     exit_payload = {
                         "quantity": state.get("qty"),
                         "product": state.get("product") or product_type,
@@ -2212,20 +2509,7 @@ def define_server(input, output, session):
                         "placed_price": price,
                         "is_production": is_production,
                     })
-                position_state.set({
-                    "open": False,
-                    "entry_order_id": None,
-                    "sl_order_id": None,
-                    "entry_price": None,
-                    "entry_fill_price": None,
-                    "qty": 0,
-                    "instrument": None,
-                    "product": None,
-                    "sl_pct": None,
-                    "sl_placed": False,
-                    "sl_attempts": 0,
-                    "sl_next_retry_ts": None,
-                })
+                _clear_local_position_state()
                 mode_msg = "production" if is_production else "sandbox"
                 trade_status_msg.set(f"[OK] Exit placed ({mode_msg})")
                 _refresh_funds()
@@ -2703,6 +2987,7 @@ def define_server(input, output, session):
             pass
 
         historical_bt_status_msg.set("[INFO] Running historical backtest...")
+        started_at = time.perf_counter()
         rows = []
         processed_days = 0
         skipped_days = 0
@@ -2823,6 +3108,28 @@ def define_server(input, output, session):
         if out_df.empty:
             historical_bt_data.set(pd.DataFrame({"Message": ["No historical backtest rows generated"]}))
             historical_bt_status_msg.set("[WARN] No rows generated for selected range")
+            elapsed_s = time.perf_counter() - started_at
+            logger.warning(
+                "Historical backtest finished with no rows in %.1fs | processed=%s skipped=%s range=%s..%s",
+                elapsed_s,
+                processed_days,
+                skipped_days,
+                start_iso,
+                end_iso,
+            )
+            await session.send_custom_message(
+                "show_toast",
+                {
+                    "title": "Historical Backtest Finished",
+                    "text": (
+                        f"No rows generated.\n"
+                        f"Elapsed: {elapsed_s:.1f}s\n"
+                        f"Days processed: {processed_days} | Days skipped: {skipped_days}"
+                    ),
+                    "variant": "warn",
+                    "duration_ms": 7000,
+                },
+            )
             return
 
         for c in [
@@ -2923,8 +3230,32 @@ def define_server(input, output, session):
         out_df = out_df[existing_preferred + extra_cols]
 
         historical_bt_data.set(out_df)
+        elapsed_s = time.perf_counter() - started_at
+        logger.info(
+            "Historical backtest completed successfully in %.1fs | rows=%s processed=%s skipped=%s range=%s..%s",
+            elapsed_s,
+            len(out_df),
+            processed_days,
+            skipped_days,
+            start_iso,
+            end_iso,
+        )
         historical_bt_status_msg.set(
-            f"[OK] Historical backtest complete: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+            f"[OK] Historical backtest complete in {elapsed_s:.1f}s: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+        )
+        await session.send_custom_message(
+            "show_toast",
+            {
+                "title": "Historical Backtest Complete",
+                "text": (
+                    f"Completed in {elapsed_s:.1f}s\n"
+                    f"Rows: {len(out_df)}\n"
+                    f"Days processed: {processed_days}\n"
+                    f"Days skipped: {skipped_days}"
+                ),
+                "variant": "success",
+                "duration_ms": 8000,
+            },
         )
         await session.send_custom_message(
             "trigger_download",
@@ -2936,6 +3267,7 @@ def define_server(input, output, session):
     @render_plotly
     def price_plot():
         _ = websocket_chart_tick.get()
+        _ = ltpc_chart_tick.get()
         df = df_data.get()
         if df is None or df.empty:
             fig = go.Figure()

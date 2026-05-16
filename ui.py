@@ -5,6 +5,7 @@ from shiny import ui
 from shinywidgets import output_widget
 
 SIDEBAR_HEADER_STYLE = "text-align:center; font-weight:700; font-size:1.15rem;"
+SUBSECTION_HEADER_STYLE = "text-align:left; font-weight:700; font-size:1.05rem;"
 
 
 # ---------------- AUTH UI ----------------
@@ -25,8 +26,15 @@ def create_auth_ui():
             ui.output_ui("login_url_display"),
             ui.input_text("auth_code", "Authorization Code", placeholder="Paste your auth code here"),
             ui.row(
-                ui.column(6, ui.input_action_button("do_auth", ui.HTML("<i class='bi bi-check2'></i> Submit"), class_="btn-success")),
-                ui.column(6, ui.input_action_button("clear_cache", ui.HTML("<i class='bi bi-box-arrow-right'></i> Logout"), class_="btn-danger")),
+                ui.column(12, ui.input_action_button("do_auth", ui.HTML("<i class='bi bi-check2'></i> Submit"), class_="btn-success", style="width:100%; margin-bottom: 12px;")),
+            ),
+            ui.div("OR", style="text-align:center; font-weight:700; margin: 0 0 12px 0;"),
+            ui.input_password("access_token", "Access Token (if already available)", placeholder="Paste your access token here"),
+            ui.row(
+                ui.column(12, ui.input_action_button("use_access_token", ui.HTML("<i class='bi bi-key-fill'></i> Use Token"), class_="btn-warning", style="width:100%; margin-bottom: 12px;")),
+            ),
+            ui.row(
+                ui.column(12, ui.input_action_button("clear_cache", ui.HTML("<i class='bi bi-box-arrow-right'></i> Logout"), class_="btn-danger")),
             ),
             style="margin-bottom: 24px;"
         ),
@@ -109,7 +117,7 @@ def data_processing_card():
 
 def live_data_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-record-circle"), " Live Data (REST API)", style=SIDEBAR_HEADER_STYLE),
+        ui.h5(ui.tags.i(class_="bi bi-record-circle"), " REST API", style=SUBSECTION_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_live_data", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_live_data", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
@@ -120,12 +128,35 @@ def live_data_card():
 
 def websocket_card():
     return ui.div(
-        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Live Data (WebSocket)", style=SIDEBAR_HEADER_STYLE),
+        ui.h5(ui.tags.i(class_="bi bi-wifi"), " Full Feed WebSocket", style=SUBSECTION_HEADER_STYLE),
         ui.row(
             ui.column(6, ui.input_action_button("start_websocket", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
             ui.column(6, ui.input_action_button("stop_websocket", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
         ui.output_text_verbatim("websocket_status"),
+    )
+
+
+def ltpc_card():
+    return ui.div(
+        ui.h5(ui.tags.i(class_="bi bi-broadcast-pin"), " LTPC WebSocket", style=SUBSECTION_HEADER_STYLE),
+        ui.row(
+            ui.column(6, ui.input_action_button("start_ltpc", ui.HTML("<i class='bi bi-play-fill'></i> Start"), class_="btn-success")),
+            ui.column(6, ui.input_action_button("stop_ltpc", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
+        ),
+        ui.output_text_verbatim("ltpc_status"),
+    )
+
+
+def live_data_section_card():
+    return ui.div(
+        ui.h5(ui.tags.i(class_="bi bi-broadcast"), " Live Data", style=SIDEBAR_HEADER_STYLE),
+        ui.tags.hr(style="margin: 10px 0 12px 0; border: 0; border-top: 2px solid rgba(255,255,255,0.28);"),
+        ui.div(live_data_card(), class_="live-data-subcard"),
+        ui.tags.hr(style="margin: 12px 0; border: 0; border-top: 2px solid rgba(255,255,255,0.22);"),
+        ui.div(websocket_card(), class_="live-data-subcard"),
+        ui.tags.hr(style="margin: 12px 0; border: 0; border-top: 2px solid rgba(255,255,255,0.22);"),
+        ui.div(ltpc_card(), class_="live-data-subcard"),
     )
 
 
@@ -225,8 +256,7 @@ def create_main_ui():
                     "input.sidebar_mode === 'data'",
                     ui.div(
                         ui.div(data_processing_card(), class_="sidebar-card sidebar-card-tall"),
-                        ui.div(live_data_card(), class_="sidebar-card sidebar-card-tall"),
-                        ui.div(websocket_card(), class_="sidebar-card sidebar-card-tall"),
+                        ui.div(live_data_section_card(), class_="sidebar-card sidebar-card-tall"),
                     )
                 ),
 
@@ -345,6 +375,79 @@ def create_app_ui():
                         }
                     };
                     window.setTimeout(triggerClick, delayMs);
+                });
+
+                Shiny.addCustomMessageHandler("show_toast", function(message) {
+                    const title = message && message.title ? String(message.title) : "Notification";
+                    const text = message && message.text ? String(message.text) : "";
+                    const variant = message && message.variant ? String(message.variant) : "info";
+                    const durationMs = message && message.duration_ms ? Number(message.duration_ms) : 6000;
+
+                    let host = document.getElementById("codex-toast-host");
+                    if (!host) {
+                        host = document.createElement("div");
+                        host.id = "codex-toast-host";
+                        host.style.position = "fixed";
+                        host.style.top = "20px";
+                        host.style.right = "20px";
+                        host.style.zIndex = "99999";
+                        host.style.display = "flex";
+                        host.style.flexDirection = "column";
+                        host.style.gap = "12px";
+                        host.style.maxWidth = "380px";
+                        document.body.appendChild(host);
+                    }
+
+                    const palette = {
+                        success: { border: "#1f8f5f", bg: "#ecfdf5" },
+                        error: { border: "#d14343", bg: "#fef2f2" },
+                        warn: { border: "#c27c18", bg: "#fffbeb" },
+                        info: { border: "#2563eb", bg: "#eff6ff" },
+                    };
+                    const colors = palette[variant] || palette.info;
+
+                    const toast = document.createElement("div");
+                    toast.style.background = colors.bg;
+                    toast.style.borderLeft = "5px solid " + colors.border;
+                    toast.style.boxShadow = "0 12px 28px rgba(15, 23, 42, 0.18)";
+                    toast.style.borderRadius = "12px";
+                    toast.style.padding = "14px 16px";
+                    toast.style.color = "#111827";
+                    toast.style.fontFamily = "Segoe UI, sans-serif";
+                    toast.style.opacity = "0";
+                    toast.style.transform = "translateY(-8px)";
+                    toast.style.transition = "opacity 160ms ease, transform 160ms ease";
+
+                    const heading = document.createElement("div");
+                    heading.textContent = title;
+                    heading.style.fontWeight = "700";
+                    heading.style.marginBottom = "4px";
+
+                    const body = document.createElement("div");
+                    body.textContent = text;
+                    body.style.fontSize = "13px";
+                    body.style.lineHeight = "1.45";
+                    body.style.whiteSpace = "pre-line";
+
+                    toast.appendChild(heading);
+                    toast.appendChild(body);
+                    host.appendChild(toast);
+
+                    window.requestAnimationFrame(function() {
+                        toast.style.opacity = "1";
+                        toast.style.transform = "translateY(0)";
+                    });
+
+                    window.setTimeout(function() {
+                        toast.style.opacity = "0";
+                        toast.style.transform = "translateY(-8px)";
+                        window.setTimeout(function() {
+                            toast.remove();
+                            if (host && host.children.length === 0) {
+                                host.remove();
+                            }
+                        }, 180);
+                    }, durationMs);
                 });
                 """
             ),

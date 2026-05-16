@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 def detect_regimes_relaxed(df_input: pd.DataFrame, params: dict = None) -> pd.DataFrame:
-    df = df_input.copy()
+    df = df_input
     p = {
         'ema_short_col': 'EMA9',
         'ema_long_len': 21,
@@ -154,15 +154,15 @@ def detect_regimes_relaxed(df_input: pd.DataFrame, params: dict = None) -> pd.Da
     regime_series[is_downtrend] = 'downtrend'
 
     # --- write outputs (only these) ---
-    df_out = df_input.copy().reset_index(drop=True)
-    df_out['EMA_Trend'] = EMA_Trend_series.values
-    df_out['Trend'] = Trend_series.values
-    df_out['regime'] = regime_series.values
+    df = df.reset_index(drop=True)
+    df['EMA_Trend'] = EMA_Trend_series.values
+    df['Trend'] = Trend_series.values
+    df['regime'] = regime_series.values
     # Also expose helper signals expected by downstream generators
-    df_out['is_downtrend'] = is_downtrend.values
+    df['is_downtrend'] = is_downtrend.values
     try:
-        df_out['BB_trend'] = BB_trend_series.values
+        df['BB_trend'] = BB_trend_series.values
     except NameError:
         # Fallback to neutral if BB_trend_series wasn't computed
-        df_out['BB_trend'] = 'neutral'
-    return df_out
+        df['BB_trend'] = 'neutral'
+    return df
