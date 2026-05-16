@@ -18,13 +18,11 @@ def idx_at_or_before(df: pd.DataFrame, target_time_str: str) -> int:
 
 
 def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None) -> pd.DataFrame:
-    """Generate buy-related signal columns on a copy of `df` and return it.
+    """Generate buy-related signal columns on `df` and return it.
 
     The implementation integrates time-checkpoint VWAP/back rules and produces
     several buy variants (Mid, Super Low, RSI range, etc.).
     """
-    df = df.copy()
-
     if df.empty:
         return df
 
@@ -289,7 +287,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     )
 
    # apply market-time window (same as you had)
-    time_window = (df['Date'].dt.time > pd.to_datetime('09:36:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
+    time_window = (df['Date'].dt.time > pd.to_datetime('09:36:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
 
    # Last-leg guard: each prior leg must have seen at least one tradable row.
     t0_had_trade = bool((base_allowed_trade_series & time_window & t0_window).any())
@@ -321,7 +319,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     condition_stoch_band_diff = (df['STOCHRSIk'] - df['STOCHRSId']) >= 2
     angle_trend_condition = df['BBM_Angle'].shift(1).rolling(window=4).mean() < df['BBM_Angle']
     volume_trend_condition = df['Volume'].shift(1).rolling(window=6).mean() < df['Volume']
-    condition_no_final_position = (df['Date'].dt.time != pd.to_datetime('15:29:00').time())
+    condition_no_final_position = (df['Date'].dt.time != pd.to_datetime('15:15:00').time())
     breaking_resistance =  df['High'].shift(1).rolling(window=5).max() < df['High']
     breaking_resistance_1 =  df['High'].rolling(window=4).max() < df['High']
     volume_profile_green = (df['volume_profile'] == 1)
@@ -380,13 +378,13 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
        
 # Final Mid BBM Bounce Buy Signal
     condition_bbm_bounce = (
-    (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) &
+    (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) &
     (df['regime'] == 'other') & 
     condition_curr_ema_near_Low & condition_curr_bbm_near_Low & condition_stoch_rsi_crossover & ema_rising_angle_degree & ema_bbm_gap_increase & BBL_angle_lower_condition
     & (bbu_rise_degree | bbm_rise_degree)  & volume_profile_green & (volume_greater_than_prev |volume_greater_than_prev_prev) #& trend_condition_not_down
     & condition_mfi_more_rsi & cond_limit_volume & condition_curr_ema_greater_than_bbm )
     df['Mid_Buy_Signal'] = (condition_bbm_bounce & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & cond_limit_volume_4
-                            & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & allowed_trade_series) & (~unstable_candle)
+                            & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & allowed_trade_series) & (~unstable_candle)
 
 ## overslod condition
     condition_stoch_over_sold = ((df['STOCHRSIk'].shift(1) < 20) & (df['STOCHRSIk'] > df['STOCHRSId']))
@@ -562,7 +560,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                   (prev_low_close_to_bbl & (df['Trend'] == 'Uptrend') & (df['BB_trend'] == 'bullish') & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
                                    & ((df['EMA_Trend'] == 'Uptrend') | (df['EMA_Trend'] == 'Flat')) & (df['volume_profile'] == 1) & (df['volume_profile'].shift(1) == 1)
                                    & (df['BBM_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'].shift(1) < 160))
-                                  ) & ~(no_trade_on_expiry_after_13) & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & (~unstable_candle) & allowed_trade_series
+                                  ) & ~(no_trade_on_expiry_after_13) & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & (~unstable_candle) & allowed_trade_series
                                     
     # code for lowest point buys 
     bbu_gt_ema9_any_past20 = (
@@ -905,13 +903,13 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                      & ((df["High"] > df["High"].shift(1)) | (df["High"] > df["High"].shift(2))))
                                      ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(no_trade__on_gap_up_red) & ~(triple_bbl__red_exhaustion) & (~no_trade_huge_opening) & (~no_trade_huge_down)
     
-    df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
-    df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover &  (df['Date'].dt.time >= pd.to_datetime('09:25:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time())
+    df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
+    df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover &  (df['Date'].dt.time >= pd.to_datetime('09:25:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
     df['Super_Low_Buy_Signal'] = condition_super_low_buy  & (~unstable_candle) & trade_allowed
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2  & (~unstable_candle) & trade_allowed
-    df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & (~unstable_candle) & allowed_trade_series 
+    df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & (~unstable_candle) & allowed_trade_series 
     df['RSI_pct_buy'] = RSI_pct_buy_signal  & (~unstable_candle) & trade_allowed
     df['Downtrend_Reverse_Buy_Signal'] = condition_downtrend_reverse
-    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time > pd.to_datetime('09:20:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:28:00').time()) & (~unstable_candle) & allowed_trade_series 
+    df['New_Uptrend_Buy_Signal'] = condition_new_uptrend_buy & (df['Date'].dt.time > pd.to_datetime('09:20:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & (~unstable_candle) & allowed_trade_series 
 
     return df

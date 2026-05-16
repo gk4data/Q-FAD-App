@@ -10,13 +10,11 @@ def _ensure_columns(df: pd.DataFrame, cols: List[str]):
 
 
 def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
-    """Generate sell-related signal columns on a copy of `df` and return it.
+    """Generate sell-related signal columns on `df` and return it.
 
     Requires columns such as 'MFI_pct', 'Close', 'STOCHRSId', 'STOCHRSIk', 'BBM_Angle',
     'EMA9', 'BBL', 'Date', 'Volume', 'BBU', 'Open', 'BBM', 'RSI', 'BBM_Angle_pct', 'MFI', 'RSI_hi'.
     """
-    df = df.copy()
-
     required = [
         'MFI_pct', 'Close', 'STOCHRSId', 'STOCHRSIk', 'BBM_Angle', 'EMA9', 'BBL', 'Date',
         'Volume', 'BBU', 'Open', 'BBM', 'RSI', 'BBM_Angle_pct', 'MFI', 'RSI_hi', 'volume_profile',
@@ -36,7 +34,7 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
     ema_bbm_minor_diff = ((((df['EMA9'] - df['BBM'].shift(1))/df['EMA9'])*100 <= 0.17) | (df['EMA9'] <= df['BBM']))
 
     ## close positions at 3.29 
-    condition_close_all_positions = (df['Date'].dt.time == pd.to_datetime('15:29:00').time())
+    condition_close_all_positions = (df['Date'].dt.time == pd.to_datetime('15:16:00').time())
                              
     condition_exit_at_top_2 = (
                               ((df['Trend'] == 'Uptrend')
