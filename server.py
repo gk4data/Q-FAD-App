@@ -1605,6 +1605,27 @@ def define_server(input, output, session):
         base_dir = os.path.join(os.getcwd(), "live_data")
         return os.path.join(base_dir, "live_data_ltpc.csv")
 
+    def _build_live_processing_window(df, target_date_str, previous_rows=60):
+        if df is None or df.empty:
+            return df
+
+        work = df.sort_values("Date").reset_index(drop=True)
+        try:
+            target_date = _dt.strptime(target_date_str, "%Y-%m-%d").date()
+        except Exception:
+            return work
+
+        date_series = work["Date"].dt.date
+        current_day = work.loc[date_series == target_date]
+        if current_day.empty:
+            return work
+
+        previous_day = work.loc[date_series < target_date].tail(previous_rows)
+        if previous_day.empty:
+            return current_day.reset_index(drop=True)
+
+        return pd.concat([previous_day, current_day], ignore_index=True)
+
     def _process_live_csv_path(path, source_name):
         if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
             return False
@@ -1620,7 +1641,7 @@ def define_server(input, output, session):
             logger.warning("%s CSV missing columns: %s", source_name, sorted(required - set(raw_df.columns)))
             return False
 
-        df = raw_df.copy()
+        df = raw_df
         df["Date"] = pd.to_datetime(df["timestamp"], errors="coerce")
         if getattr(df["Date"].dt, "tz", None) is not None:
             df["Date"] = df["Date"].dt.tz_localize(None)
@@ -1640,22 +1661,7 @@ def define_server(input, output, session):
             return False
 
         target_date_str = _as_iso(_dt.now().date())
-        inst = selected_instrument_key.get() or input.instrument().strip()
-        has_prev_day = False
-        try:
-            min_date = df["Date"].dt.date.min()
-            max_date = df["Date"].dt.date.max()
-            target_date = _dt.strptime(target_date_str, "%Y-%m-%d").date()
-            has_prev_day = (
-                min_date is not None and max_date is not None and min_date < target_date <= max_date
-            )
-        except Exception:
-            has_prev_day = False
-
-        if inst and token.get() and not has_prev_day:
-            df = concatenate_with_previous_day(
-                df, inst, token.get(), target_date_str, interval="1minute", mode="date_range"
-            )
+        df = _build_live_processing_window(df, target_date_str, previous_rows=60)
 
         df = calculate_indicators(df)
         df = detect_regimes_relaxed(df)
@@ -1666,7 +1672,7 @@ def define_server(input, output, session):
         else:
             logger.warning("%s CSV: skipping signals (no 09:15 candle found)", source_name)
         df = filter_to_current_day(df, target_date_str)
-        df_data.set(df.copy())
+        df_data.set(df)
         _maybe_execute_trade(df)
         return True
 
@@ -1728,7 +1734,7 @@ def define_server(input, output, session):
                 live_status_msg.set("[INFO] Live fetch stopped")
                 return
 
-            df_data.set(df.copy())
+            df_data.set(df)
             try:
                 last_ts = df["Date"].max()
                 last_ts_str = (

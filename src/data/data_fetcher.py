@@ -241,11 +241,10 @@ def filter_to_current_day(df: pd.DataFrame, target_date_str: str) -> pd.DataFram
         Filtered dataframe with only current day data
     """
     if df.empty:
-        return df.copy()
+        return df
     
     try:
         target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
-        df = df.copy()
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         
         # Filter to target date only
@@ -257,4 +256,4 @@ def filter_to_current_day(df: pd.DataFrame, target_date_str: str) -> pd.DataFram
     
     except Exception as e:
         print(f"[WARN] Error filtering to current day: {e}. Returning all data.")
-        return df.copy()
+        return df

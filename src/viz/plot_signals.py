@@ -11,16 +11,16 @@ def plot_signals(df):
     
     # Preserve original Date column values from API and use them as x-values
     if 'Date' in df.columns:
-        df = df.copy()
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        date_series = pd.to_datetime(df['Date'], errors='coerce')
         # Don't force timezone conversions here - preserve timestamps exactly as provided by API
         try:
             # Use numpy array of Python datetimes for Plotly; this keeps hover rendering as Plotly default
-            x_vals = np.array(df['Date'].dt.to_pydatetime(), dtype=object)
+            x_vals = np.array(date_series.dt.to_pydatetime(), dtype=object)
         except Exception:
             # fallback to strings to avoid numeric hover display
-            x_vals = df['Date'].astype(str)
+            x_vals = date_series.astype(str)
     else:
+        date_series = None
         x_vals = None
 
     # Create figure with 5 subplots
@@ -34,14 +34,14 @@ def plot_signals(df):
 
     # Static buy-session bands (repeated for each date in the data).
     # Use layout shapes with xref='x' + yref='paper' for broad compatibility.
-    if 'Date' in df.columns and df['Date'].notna().any():
+    if date_series is not None and date_series.notna().any():
         session_windows = [
             ('09:15:00', '10:14:00', 'rgba(30, 58, 95, 0.14)'),   # deep slate-blue
             ('10:15:00', '11:59:00', 'rgba(17, 94, 89, 0.13)'),   # deep teal
             ('12:00:00', '13:59:00', 'rgba(30, 58, 95, 0.14)'),  # muted indigo
             ('14:00:00', '15:28:00', 'rgba(17, 94, 89, 0.13)'),  # muted amber-brown
         ]
-        for trading_day in df['Date'].dt.normalize().dropna().unique():
+        for trading_day in date_series.dt.normalize().dropna().unique():
             day_str = pd.Timestamp(trading_day).strftime('%Y-%m-%d')
             for start_t, end_t, fill_color in session_windows:
                 fig.add_shape(
