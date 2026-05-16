@@ -376,6 +376,79 @@ def create_app_ui():
                     };
                     window.setTimeout(triggerClick, delayMs);
                 });
+
+                Shiny.addCustomMessageHandler("show_toast", function(message) {
+                    const title = message && message.title ? String(message.title) : "Notification";
+                    const text = message && message.text ? String(message.text) : "";
+                    const variant = message && message.variant ? String(message.variant) : "info";
+                    const durationMs = message && message.duration_ms ? Number(message.duration_ms) : 6000;
+
+                    let host = document.getElementById("codex-toast-host");
+                    if (!host) {
+                        host = document.createElement("div");
+                        host.id = "codex-toast-host";
+                        host.style.position = "fixed";
+                        host.style.top = "20px";
+                        host.style.right = "20px";
+                        host.style.zIndex = "99999";
+                        host.style.display = "flex";
+                        host.style.flexDirection = "column";
+                        host.style.gap = "12px";
+                        host.style.maxWidth = "380px";
+                        document.body.appendChild(host);
+                    }
+
+                    const palette = {
+                        success: { border: "#1f8f5f", bg: "#ecfdf5" },
+                        error: { border: "#d14343", bg: "#fef2f2" },
+                        warn: { border: "#c27c18", bg: "#fffbeb" },
+                        info: { border: "#2563eb", bg: "#eff6ff" },
+                    };
+                    const colors = palette[variant] || palette.info;
+
+                    const toast = document.createElement("div");
+                    toast.style.background = colors.bg;
+                    toast.style.borderLeft = "5px solid " + colors.border;
+                    toast.style.boxShadow = "0 12px 28px rgba(15, 23, 42, 0.18)";
+                    toast.style.borderRadius = "12px";
+                    toast.style.padding = "14px 16px";
+                    toast.style.color = "#111827";
+                    toast.style.fontFamily = "Segoe UI, sans-serif";
+                    toast.style.opacity = "0";
+                    toast.style.transform = "translateY(-8px)";
+                    toast.style.transition = "opacity 160ms ease, transform 160ms ease";
+
+                    const heading = document.createElement("div");
+                    heading.textContent = title;
+                    heading.style.fontWeight = "700";
+                    heading.style.marginBottom = "4px";
+
+                    const body = document.createElement("div");
+                    body.textContent = text;
+                    body.style.fontSize = "13px";
+                    body.style.lineHeight = "1.45";
+                    body.style.whiteSpace = "pre-line";
+
+                    toast.appendChild(heading);
+                    toast.appendChild(body);
+                    host.appendChild(toast);
+
+                    window.requestAnimationFrame(function() {
+                        toast.style.opacity = "1";
+                        toast.style.transform = "translateY(0)";
+                    });
+
+                    window.setTimeout(function() {
+                        toast.style.opacity = "0";
+                        toast.style.transform = "translateY(-8px)";
+                        window.setTimeout(function() {
+                            toast.remove();
+                            if (host && host.children.length === 0) {
+                                host.remove();
+                            }
+                        }, 180);
+                    }, durationMs);
+                });
                 """
             ),
         ),
