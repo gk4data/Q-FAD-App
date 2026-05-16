@@ -5,6 +5,7 @@ import json
 import logging
 import traceback
 import tempfile
+import time
 import requests
 import pandas as pd
 import numpy as np
@@ -2986,6 +2987,7 @@ def define_server(input, output, session):
             pass
 
         historical_bt_status_msg.set("[INFO] Running historical backtest...")
+        started_at = time.perf_counter()
         rows = []
         processed_days = 0
         skipped_days = 0
@@ -3106,6 +3108,28 @@ def define_server(input, output, session):
         if out_df.empty:
             historical_bt_data.set(pd.DataFrame({"Message": ["No historical backtest rows generated"]}))
             historical_bt_status_msg.set("[WARN] No rows generated for selected range")
+            elapsed_s = time.perf_counter() - started_at
+            logger.warning(
+                "Historical backtest finished with no rows in %.1fs | processed=%s skipped=%s range=%s..%s",
+                elapsed_s,
+                processed_days,
+                skipped_days,
+                start_iso,
+                end_iso,
+            )
+            await session.send_custom_message(
+                "show_toast",
+                {
+                    "title": "Historical Backtest Finished",
+                    "text": (
+                        f"No rows generated.\n"
+                        f"Elapsed: {elapsed_s:.1f}s\n"
+                        f"Days processed: {processed_days} | Days skipped: {skipped_days}"
+                    ),
+                    "variant": "warn",
+                    "duration_ms": 7000,
+                },
+            )
             return
 
         for c in [
@@ -3206,8 +3230,32 @@ def define_server(input, output, session):
         out_df = out_df[existing_preferred + extra_cols]
 
         historical_bt_data.set(out_df)
+        elapsed_s = time.perf_counter() - started_at
+        logger.info(
+            "Historical backtest completed successfully in %.1fs | rows=%s processed=%s skipped=%s range=%s..%s",
+            elapsed_s,
+            len(out_df),
+            processed_days,
+            skipped_days,
+            start_iso,
+            end_iso,
+        )
         historical_bt_status_msg.set(
-            f"[OK] Historical backtest complete: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+            f"[OK] Historical backtest complete in {elapsed_s:.1f}s: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+        )
+        await session.send_custom_message(
+            "show_toast",
+            {
+                "title": "Historical Backtest Complete",
+                "text": (
+                    f"Completed in {elapsed_s:.1f}s\n"
+                    f"Rows: {len(out_df)}\n"
+                    f"Days processed: {processed_days}\n"
+                    f"Days skipped: {skipped_days}"
+                ),
+                "variant": "success",
+                "duration_ms": 8000,
+            },
         )
         await session.send_custom_message(
             "trigger_download",
