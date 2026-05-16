@@ -133,6 +133,18 @@ class UpstoxClient:
         r.raise_for_status()
         return r.json()
 
+    def get_positions(self, access_token: str):
+        """Fetch current short-term positions for the user."""
+        url = f"{self.base_url}/portfolio/short-term-positions"
+        headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        r = requests.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
     def exit_all_positions(self, access_token: str, segment: str | None = None, tag: str | None = None):
         """Exit all open positions, optionally filtered by segment and/or tag."""
         url = f"{self.base_url}/order/positions/exit"

@@ -305,6 +305,7 @@ class LiveDataRecorder:
             with self._lock:
                 self._last_save_path = output_path
                 self._last_save_time = datetime.now()
+                self._live_save_counter += 1
             logger.info(
                 "WebSocket backfill saved: rows=%s last=%s path=%s",
                 len(backfill_df),
