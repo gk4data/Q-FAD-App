@@ -1,14 +1,15 @@
 {
   "exchange": "NSE",
   "auto_load_instruments": true,
-  "select_type": "CE",
-  "instrument": "NSE_FO|41739",
+  "select_type": "PE",
+  "instrument": "NSE_FO|51349",
   "interval": "1minute",
-  "fetch_mode": "expired",
-  "start_date": "2026-05-12",
-  "end_date": "2026-05-12",
+  "fetch_mode": "intraday",
+  "start_date": "2026-05-18",
+  "end_date": "2026-05-18",
   "auto_save": true,
   "save_dir": "",
   "select_symbol": "NIFTY",
-  "select_expiry": "2026-05-12"
+  "select_expiry": "2026-05-19",
+  "select_strike": "23400"
 }

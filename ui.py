@@ -172,12 +172,18 @@ def live_trading_card():
             ui.column(6, ui.input_action_button("start_live", ui.HTML("<i class='bi bi-play-fill'></i> Start Live"), class_="btn-warning")),
             ui.column(6, ui.input_action_button("stop_live", ui.HTML("<i class='bi bi-stop-fill'></i> Stop"), class_="btn-danger")),
         ),
+        ui.input_action_button(
+            "exit_app_position",
+            ui.HTML("<i class='bi bi-box-arrow-right'></i> Exit Broker Positions"),
+            class_="btn-danger",
+            style="width:100%; margin-top: 8px;",
+        ),
 
         ui.tags.hr(),
 
         ui.h6("Sandbox Trading", style=SIDEBAR_HEADER_STYLE),
         ui.input_password("sandbox_token", "Sandbox Token"),
-        ui.input_numeric("sandbox_capital", "Available Capital", value=1000, min=1),
+        ui.input_numeric("sandbox_capital", "Available Capital", value=100000, min=1),
         ui.input_numeric("sandbox_sl_percent", "Stop Loss %", value=15, min=1, max=50),
         ui.input_select("sandbox_product_type", "Product", choices={"I": "Intraday", "D": "Delivery"}, selected="I"),
         ui.row(

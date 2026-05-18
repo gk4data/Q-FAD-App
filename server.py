@@ -124,6 +124,7 @@ def define_server(input, output, session):
     selected_exchange = reactive.Value("NSE")
     historical_file_path = os.path.join(os.getcwd(), "live_data", "historical_orders.csv")
     ui_prefs_path = os.path.join(os.getcwd(), "live_data", "ui_prefs.json")
+    sandbox_token_path = os.path.join(os.getcwd(), "live_data", "sandbox_token.json")
     saved_ui_prefs = reactive.Value({})
     ui_prefs_restored = reactive.Value(False)
 
@@ -154,6 +155,28 @@ def define_server(input, output, session):
                 json.dump(data, f, indent=2)
         except Exception as exc:
             logger.warning("Could not save UI preferences: %s", exc)
+
+    def _load_saved_sandbox_token():
+        try:
+            if not os.path.exists(sandbox_token_path):
+                return ""
+            with open(sandbox_token_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return str(data.get("sandbox_token") or "").strip()
+        except Exception as exc:
+            logger.warning("Could not load sandbox token cache: %s", exc)
+            return ""
+
+    def _save_sandbox_token(token_val: str):
+        token_val = str(token_val or "").strip()
+        if not token_val:
+            return
+        try:
+            os.makedirs(os.path.dirname(sandbox_token_path), exist_ok=True)
+            with open(sandbox_token_path, "w", encoding="utf-8") as f:
+                json.dump({"sandbox_token": token_val, "saved_at": _dt.now().isoformat()}, f, indent=2)
+        except Exception as exc:
+            logger.warning("Could not save sandbox token cache: %s", exc)
 
     def _get_input_value(input_id, default=None):
         try:
@@ -2045,6 +2068,87 @@ def define_server(input, output, session):
             logger.error("Traceback: %s", traceback.format_exc())
             return {"status": "error", "errors": [{"message": err}]}
 
+    def _get_order_book_safe(trade_client, token_val):
+        """Fetch order book with full request/response logging."""
+        try:
+            logger.info("=== BROKER ORDER BOOK REQUEST ===")
+            resp = trade_client.get_order_book(token_val)
+            logger.info("=== BROKER ORDER BOOK RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            return resp
+        except Exception as exc:
+            err = _extract_http_error_message(exc)
+            logger.error("=== BROKER ORDER BOOK ERROR ===")
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
+            return {"status": "error", "errors": [{"message": err}]}
+
+    def _is_pending_order_status(status):
+        status_l = str(status or "").strip().lower()
+        if not status_l:
+            return False
+        closed = {"complete", "completed", "cancelled", "canceled", "rejected", "failed"}
+        return status_l not in closed
+
+    def _cancel_all_pending_orders(trade_client, token_val):
+        payload = _get_order_book_safe(trade_client, token_val)
+        if payload.get("status") == "error":
+            return 0, 0, payload.get("errors", [{}])[0].get("message", "Order book fetch failed")
+
+        rows = payload.get("data", []) if isinstance(payload, dict) else []
+        canceled = 0
+        failed = 0
+        for row in rows if isinstance(rows, list) else []:
+            row_inst = str(row.get("instrument_token") or row.get("instrument_key") or "").strip()
+            if not _is_pending_order_status(row.get("status") or row.get("order_status")):
+                continue
+            order_id = row.get("order_id") or row.get("orderId")
+            if not order_id:
+                continue
+            cancel_resp = _cancel_order_safe(trade_client, token_val, order_id)
+            qty = row.get("quantity") or row.get("pending_quantity")
+            if cancel_resp.get("status") == "success":
+                canceled += 1
+                _append_order_log("CANCEL", row_inst, qty, None, order_id, "success", "Pending order canceled before broker exit")
+            else:
+                failed += 1
+                error_msg = cancel_resp.get("errors", [{}])[0].get("message", cancel_resp.get("message", "Cancel failed"))
+                _append_order_log("CANCEL", row_inst, qty, None, order_id, "error", f"Pending order cancel failed before broker exit: {error_msg}")
+        return canceled, failed, None
+
+    def _get_positions_safe(trade_client, token_val):
+        """Fetch broker positions with full request/response logging."""
+        try:
+            logger.info("=== BROKER POSITIONS REQUEST ===")
+            resp = trade_client.get_positions(token_val)
+            logger.info("=== BROKER POSITIONS RESPONSE ===")
+            logger.info("Response: %s", json.dumps(resp, indent=2, default=str))
+            return resp
+        except Exception as exc:
+            err = _extract_http_error_message(exc)
+            logger.error("=== BROKER POSITIONS ERROR ===")
+            logger.error("Exception: %s", err)
+            logger.error("Traceback: %s", traceback.format_exc())
+            return {"status": "error", "errors": [{"message": err}]}
+
+    def _position_instrument(row):
+        return str(
+            row.get("instrument_token")
+            or row.get("instrument_key")
+            or row.get("instrument")
+            or ""
+        ).strip()
+
+    def _position_quantity(row):
+        raw_qty = row.get("quantity", row.get("net_quantity", row.get("day_buy_quantity", 0)))
+        try:
+            return int(float(raw_qty or 0))
+        except Exception:
+            return 0
+
+    def _position_product(row, fallback):
+        return row.get("product") or row.get("product_type") or fallback
+
     def _round_to_tick(value, tick_size):
         try:
             v = float(value)
@@ -2093,13 +2197,13 @@ def define_server(input, output, session):
         
         return resp, "SL"
 
-    def _fetch_order_fill(order_id, access_token):
+    def _fetch_order_fill(trade_client, order_id, access_token):
         """Fetch order fill details with logging."""
         try:
             logger.debug("=== FETCHING ORDER FILL ===")
             logger.debug("Order ID: %s", order_id)
             
-            payload = client.get_order_history(access_token, order_id)
+            payload = trade_client.get_order_history(access_token, order_id)
             
             logger.debug("Order history response: %s", json.dumps(payload, indent=2, default=str))
             
@@ -2127,12 +2231,12 @@ def define_server(input, output, session):
         
         return avg_price, status, filled_qty
 
-    def _broker_open_position_qty(inst: str, access_token: str):
+    def _broker_open_position_qty(trade_client, inst: str, access_token: str):
         """Return broker-confirmed open quantity for instrument, or None if unavailable."""
         if not inst or not access_token:
             return None
         try:
-            payload = client.get_positions(access_token)
+            payload = trade_client.get_positions(access_token)
         except Exception as exc:
             logger.warning("Broker position fetch failed for %s: %s", inst, exc)
             return None
@@ -2289,11 +2393,16 @@ def define_server(input, output, session):
         qty = _calculate_qty(price, capital, lot_size, selected_lots)
 
         if buy_signal and not state.get("open") and qty <= 0:
+            needed_qty = (max(int(selected_lots or 1), 1) * int(lot_size)) if manual_lot_sizing else int(lot_size or 1)
+            needed_capital = (float(price) * needed_qty) if price is not None else None
+            capital_msg = f"available capital {capital:.2f}" if capital is not None else "available capital unavailable"
+            needed_msg = f", required approx {needed_capital:.2f}" if needed_capital is not None else ""
+            skip_msg = f"Available capital is not enough to place this order ({capital_msg}{needed_msg})"
             if _use_production_trading() and manual_lot_sizing:
-                trade_status_msg.set("[ERROR] Insufficient capital for selected lots; check capital/price/lot size")
+                trade_status_msg.set(f"[ERROR] {skip_msg}; reduce lots or add funds")
             else:
-                trade_status_msg.set("[ERROR] Quantity calculated as 0; check capital/price/lot size")
-            _append_order_log("SKIP", inst, qty, price, None, "error", "Quantity is 0")
+                trade_status_msg.set(f"[ERROR] {skip_msg}; check capital/price/lot size")
+            _append_order_log("SKIP", inst, qty, price, None, "error", skip_msg)
             last_signal_key.set(signal_key)
             return
 
@@ -2340,12 +2449,13 @@ def define_server(input, output, session):
                     return
 
                 sl_id = None
+                entry_fill_price = price if not is_production else None
                 position_state.set({
                     "open": True,
                     "entry_order_id": entry_id,
                     "sl_order_id": sl_id,
                     "entry_price": price,
-                    "entry_fill_price": None,
+                    "entry_fill_price": entry_fill_price,
                     "qty": qty,
                     "instrument": inst,
                     "product": product_type,
@@ -2359,50 +2469,27 @@ def define_server(input, output, session):
                 if is_production:
                     trade_status_msg.set(f"[OK] Entry placed ({mode_msg}); waiting for fill to place SL")
                 else:
-                    tick_size = instrument_manager.get_tick_size(inst, default=0.05)
-                    sl_trigger = _round_to_tick(price * (1 - (sl_pct / 100.0)), tick_size) if price else 0
-                    sl_resp, sl_type = _place_stop_loss_order(
-                        trade_client, token_val, inst, qty, product_type, sl_trigger, tick_size
-                    )
-                    logger.info("SL order response: %s", sl_resp)
-                    sl_status = sl_resp.get("status", "")
-                    if sl_status == "success":
-                        sl_order_ids = sl_resp.get("data", {}).get("order_ids", [])
-                        sl_id = sl_order_ids[0] if sl_order_ids else None
-                        _append_order_log("SL", inst, qty, sl_trigger, sl_id, "success", f"Stop loss placed ({sl_type}): {sl_id}")
-                        position_state.set({
-                            **position_state.get(),
-                            "sl_order_id": sl_id,
-                            "sl_placed": True,
-                            "sl_attempts": 0,
-                            "sl_next_retry_ts": None,
-                        })
-                        trade_status_msg.set(f"[OK] Entry + SL placed ({mode_msg})")
-                    else:
-                        error_msg = sl_resp.get("errors", [{}])[0].get("message", sl_resp.get("message", "Unknown error"))
-                        _append_order_log("SL", inst, qty, sl_trigger, None, "error", f"SL ({sl_type}) failed: {error_msg}")
-                        trade_status_msg.set(f"[ERROR] Stop loss order failed: {error_msg}")
-                _refresh_funds()
+                    trade_status_msg.set(f"[OK] Entry filled ({mode_msg}); waiting to place SL")
+                if is_production:
+                    _refresh_funds()
 
             if sell_signal:
                 state = position_state.get() or {}
-                broker_qty = None
-                if is_production:
-                    broker_qty = _broker_open_position_qty(inst, token_val)
-                    if broker_qty is not None and broker_qty <= 0:
-                        _append_order_log(
-                            "SKIP",
-                            inst,
-                            state.get("qty", 0),
-                            price,
-                            None,
-                            "info",
-                            "Sell blocked: broker shows no open position",
-                        )
-                        _clear_local_position_state("broker shows position already closed")
-                        trade_status_msg.set("[INFO] Sell blocked because broker shows no open position; local state reset")
-                        last_signal_key.set(signal_key)
-                        return
+                broker_qty = _broker_open_position_qty(trade_client, inst, token_val)
+                if broker_qty is not None and broker_qty <= 0:
+                    _append_order_log(
+                        "SKIP",
+                        inst,
+                        state.get("qty", 0),
+                        price,
+                        None,
+                        "info",
+                        "Sell blocked: broker shows no open position",
+                    )
+                    _clear_local_position_state("broker shows position already closed")
+                    trade_status_msg.set("[INFO] Sell blocked because broker shows no open position; local state reset")
+                    last_signal_key.set(signal_key)
+                    return
 
                 sl_id = state.get("sl_order_id")
                 if sl_id:
@@ -2512,7 +2599,8 @@ def define_server(input, output, session):
                 _clear_local_position_state()
                 mode_msg = "production" if is_production else "sandbox"
                 trade_status_msg.set(f"[OK] Exit placed ({mode_msg})")
-                _refresh_funds()
+                if is_production:
+                    _refresh_funds()
 
             last_signal_key.set(signal_key)
 
@@ -2574,7 +2662,11 @@ def define_server(input, output, session):
     def _get_sandbox_token():
         ui_token = input.sandbox_token().strip()
         if ui_token:
+            _save_sandbox_token(ui_token)
             return ui_token
+        saved_token = _load_saved_sandbox_token()
+        if saved_token:
+            return saved_token
         return os.getenv("UPSTOX_SANDBOX_TOKEN", "").strip()
 
     @reactive.effect
@@ -2619,22 +2711,115 @@ def define_server(input, output, session):
         trade_status_msg.set("[INFO] Live trading stopped")
 
     @reactive.effect
+    @reactive.event(input.exit_app_position)
+    def _exit_app_position():
+        if live_trading_mode.get() == "sandbox":
+            trade_client = sandbox_client
+            access_token = _get_sandbox_token()
+            is_production = False
+        else:
+            trade_client = client
+            access_token = token.get()
+            is_production = True
+        mode_msg = "production" if is_production else "sandbox"
+        if not access_token:
+            trade_status_msg.set(f"[ERROR] Authenticate/provide token to exit broker positions ({mode_msg})")
+            return
+
+        trade_status_msg.set(f"[INFO] Canceling all pending orders before broker exit ({mode_msg})...")
+        canceled, failed, err = _cancel_all_pending_orders(trade_client, access_token)
+        if err:
+            trade_status_msg.set(f"[ERROR] Could not fetch/cancel pending orders before broker exit: {err}")
+            return
+        if failed:
+            trade_status_msg.set(f"[ERROR] {failed} pending order(s) could not be canceled; broker exit blocked")
+            return
+
+        positions_payload = _get_positions_safe(trade_client, access_token)
+        if positions_payload.get("status") == "error":
+            err_msg = positions_payload.get("errors", [{}])[0].get("message", "Positions fetch failed")
+            trade_status_msg.set(f"[ERROR] Could not fetch broker positions after canceling {canceled} pending order(s): {err_msg}")
+            return
+
+        rows = positions_payload.get("data", []) if isinstance(positions_payload, dict) else []
+        if not isinstance(rows, list):
+            rows = []
+
+        fallback_product = input.live_product_type() if is_production else input.sandbox_product_type()
+        placed = 0
+        skipped_short = 0
+        failed_exits = 0
+        for row in rows:
+            inst = _position_instrument(row)
+            qty = _position_quantity(row)
+            if not inst or qty == 0:
+                continue
+            if qty < 0:
+                skipped_short += 1
+                _append_order_log("SKIP", inst, qty, None, None, "info", "Broker exit skipped short/negative quantity; no BUY exit placed")
+                continue
+
+            product = _position_product(row, fallback_product)
+            exit_payload = {
+                "quantity": qty,
+                "product": product,
+                "validity": "DAY",
+                "price": 0,
+                "tag": "qfad-broker-exit",
+                "instrument_token": inst,
+                "order_type": "MARKET",
+                "transaction_type": "SELL",
+                "disclosed_quantity": 0,
+                "trigger_price": 0,
+                "is_amo": False,
+                "slice": False,
+            }
+            exit_resp = _place_order_safe(trade_client, access_token, exit_payload)
+            if exit_resp.get("status") == "success":
+                order_ids = exit_resp.get("data", {}).get("order_ids", [])
+                exit_id = order_ids[0] if order_ids else None
+                placed += 1
+                _append_order_log("EXIT_ALL", inst, qty, None, exit_id, "success", f"Broker exit SELL market placed after canceling {canceled} pending order(s)")
+            else:
+                failed_exits += 1
+                error_msg = exit_resp.get("errors", [{}])[0].get("message", exit_resp.get("message", "Unknown error"))
+                _append_order_log("EXIT_ALL", inst, qty, None, None, "error", f"Broker exit failed after canceling {canceled} pending order(s): {error_msg}")
+
+        if failed_exits:
+            trade_status_msg.set(f"[ERROR] Broker exit placed {placed}, failed {failed_exits}, skipped shorts {skipped_short}; canceled {canceled} pending order(s)")
+            return
+        if placed == 0:
+            _clear_local_position_state("broker exit found no positive broker positions")
+            trade_status_msg.set(f"[INFO] No positive broker positions to sell; canceled {canceled} pending order(s), skipped shorts {skipped_short}")
+        else:
+            _clear_local_position_state("broker exit placed for all positive positions")
+            trade_status_msg.set(f"[OK] Broker exit placed for {placed} position(s); canceled {canceled} pending order(s), skipped shorts {skipped_short}")
+        if is_production:
+            _refresh_funds()
+
+    @reactive.effect
     def _resolve_live_fills():
         if not live_trading_enabled.get():
             reactive.invalidate_later(3)
             return
-        if not _use_production_trading():
+        if live_trading_mode.get() not in ("live", "sandbox"):
             reactive.invalidate_later(3)
             return
-        access_token = token.get()
+        trade_client, access_token, is_production = _get_trade_client_and_token()
         if not access_token:
             reactive.invalidate_later(3)
             return
+        mode_msg = "production" if is_production else "sandbox"
 
         state = position_state.get() or {}
         entry_id = state.get("entry_order_id")
         if entry_id and not state.get("entry_fill_price"):
-            avg_price, status, _ = _fetch_order_fill(entry_id, access_token)
+            if is_production:
+                avg_price, status, _ = _fetch_order_fill(trade_client, entry_id, access_token)
+            else:
+                avg_price = state.get("entry_price")
+                status = "complete"
+                logger.info("Sandbox order history is unavailable; assuming entry %s filled @ %s", entry_id, avg_price)
             if avg_price and ("complete" in status or "filled" in status):
                 position_state.set({
                     **state,
@@ -2644,19 +2829,19 @@ def define_server(input, output, session):
                 _update_order_log(entry_id, fill_price=avg_price, message=f"Entry filled @ {avg_price}")
                 state = position_state.get() or {}
 
-        # In production, place SL only after entry fill is confirmed.
+        # In production the fill is broker-confirmed; in sandbox it is inferred from the accepted market order.
         retry_after = state.get("sl_next_retry_ts") or 0
         now_ts = _dt.now().timestamp()
         if state.get("open") and not state.get("sl_placed") and state.get("entry_fill_price") and now_ts >= float(retry_after):
             inst = state.get("instrument")
             qty = state.get("qty") or 0
-            product = state.get("product") or input.live_product_type()
-            sl_pct = state.get("sl_pct") or input.live_sl_percent()
+            product = state.get("product") or (input.live_product_type() if is_production else input.sandbox_product_type())
+            sl_pct = state.get("sl_pct") or (input.live_sl_percent() if is_production else input.sandbox_sl_percent())
             entry_fill = state.get("entry_fill_price")
             tick_size = instrument_manager.get_tick_size(inst, default=0.05)
             sl_trigger = _round_to_tick(float(entry_fill) * (1 - (float(sl_pct) / 100.0)), tick_size)
             sl_resp, sl_type = _place_stop_loss_order(
-                client, access_token, inst, qty, product, sl_trigger, tick_size
+                trade_client, access_token, inst, qty, product, sl_trigger, tick_size
             )
             logger.info("Deferred SL order response: %s", sl_resp)
             if sl_resp.get("status") == "success":
@@ -2670,7 +2855,7 @@ def define_server(input, output, session):
                     "sl_attempts": 0,
                     "sl_next_retry_ts": None,
                 })
-                trade_status_msg.set("[OK] Entry filled and SL placed")
+                trade_status_msg.set(f"[OK] Entry filled and SL placed ({mode_msg})")
             else:
                 error_msg = sl_resp.get("errors", [{}])[0].get("message", sl_resp.get("message", "Unknown error"))
                 attempts = int(state.get("sl_attempts") or 0) + 1
@@ -2686,7 +2871,12 @@ def define_server(input, output, session):
         pending = pending_exit.get()
         if pending and pending.get("exit_order_id"):
             exit_id = pending.get("exit_order_id")
-            avg_price, status, _ = _fetch_order_fill(exit_id, access_token)
+            if is_production:
+                avg_price, status, _ = _fetch_order_fill(trade_client, exit_id, access_token)
+            else:
+                avg_price = pending.get("placed_price")
+                status = "complete"
+                logger.info("Sandbox order history is unavailable; assuming exit %s filled @ %s", exit_id, avg_price)
             if avg_price and ("complete" in status or "filled" in status):
                 entry_fill = pending.get("entry_fill_price")
                 qty = pending.get("qty") or 0
