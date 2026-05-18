@@ -53,6 +53,7 @@ credentials.json
 .cache/
 tmp_exports/
 live_data/*.csv
+live_data/sandbox_token.json
 !live_data/.gitkeep
 
 # Jupyter Notebook
