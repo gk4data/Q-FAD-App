@@ -111,10 +111,12 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     c4 = first_pos + 3
     c5 = first_pos + 4
     c930 = first_pos + 14  # 9:30 is 15 minutes after 9:15, so +14 from the first candle (0-based index)
+    c1014 = first_pos + 59  # 10:14 is 59 minutes after 9:15
     false_series = pd.Series(False, index=df.index)
     has_c3 = c3 < len(df)
     has_c4 = c4 < len(df)
     has_c930 = c930 < len(df)
+    has_c1014 = c1014 < len(df)
 
     if has_c4:
         green_continuation = (
@@ -178,6 +180,17 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                 & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL'])
                                 & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
     
+    no_trade_gapup_then_fall = false_series
+    if has_c3 and has_c1014:
+        max_close_till_1014 = df['Close'].iloc[c1:c1014 + 1].max()
+        no_trade_gapup_then_fall = ((((df.iloc[c1]['High'] - df.iloc[c1]['Low']) / df.iloc[c1]['High']) * 100 > 28)
+                                & (df.iloc[c1]['Close'] > df.iloc[c1]['BBU']) & (df.iloc[c1]['volume_profile'] == 1)
+                                & (df.iloc[c2]['Close'] > df.iloc[c2]['BBU']) & (df.iloc[c2]['volume_profile'] == 1)
+                                & (df.iloc[c3]['Close'] > df.iloc[c3]['BBU']) & (df.iloc[c3]['volume_profile'] == 1)
+                                & (((max_close_till_1014 - df.iloc[c1014]['Close']) / (df.iloc[c1014]['Close'])) * 100 > 10)
+                                ) & (df['Date'].dt.time > pd.to_datetime('10:14:00').time())
+
+    
     # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
     no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
     no_trade_at_huge_gap_up_at_all = bool(no_trade_at_huge_gap_up.any())
@@ -230,11 +243,11 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         or no_trade_huge_down_at_all
     )
     effective_no_trade_gap_up_red_block = (
-        (releasable_gap_up_hard_block and (~restart_gap_up_trade_after_t2))
+        ((no_trade_gapup_then_fall | releasable_gap_up_hard_block) & (~restart_gap_up_trade_after_t2))
         | persistent_hard_block
     )
     effective_crossover_no_trade_block = (
-        ((no_trade_gap_up_red_1_at_all or no_trade_huge_opening_at_all) and (~restart_gap_up_trade_after_t2))
+        ((no_trade_gapup_then_fall | (no_trade_gap_up_red_1_at_all or no_trade_huge_opening_at_all)) & (~restart_gap_up_trade_after_t2))
         | no_trade_huge_down_at_all
     )
 
