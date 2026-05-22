@@ -138,6 +138,7 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                 ((df['EMA_Trend'] == 'Downtrend') & (df['Trend'] == 'Downtrend') & (df['regime'] == 'downtrend') & (df['volume_profile'] == 0)
                                 & ((df['Close'].shift(1) >= df['EMA9'].shift(1)) 
                                     | ((df['Open'].shift(1) >= df['EMA9'].shift(1)) & (df['Close'].shift(1) <= df['EMA9'].shift(1)))) 
+                                & ((df['Low'].shift(1) >= df['Low']) | (df['Low'].shift(2) >= df['Low']))
                                 & (df['Close'] < df['EMA9']) & (df['High'].shift(2) >= df['High']))
                                 |
                                 (((df['Close'].shift(1) >= df['EMA9'].shift(1)) | (df['Close'].shift(2) >= df['EMA9'].shift(2)) | (df['Close'].shift(3) >= df['EMA9'].shift(3)) 
@@ -284,9 +285,10 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                         (((df['Downtrend_Reverse_Buy_Signal'].shift(1) == True) | (df['Downtrend_Reverse_Buy_Signal'].shift(2) == True))
                          & (df['EMA9'] < df['BBM']) & ((df['EMA9'].shift(1) < df['BBM'].shift(1)) | (df['EMA9'].shift(2) < df['BBM'].shift(2)))
                          & volume_profile_red & (df['BBM_Angle_Degree'] > 180) & (df['EMA_Angle_Degree'] > 180)
-                         & (((df['Low'] < df['Low'].shift(1)) & (((df['Low'].shift(1) - df['Low']) / df['Low'].shift(1))*100 > 0.05)) 
-                            | ((((df['Open']) - df['Close']) / df['Open'])*100 > 0.55) | (df['BBL'] < df['BBL'].shift(1))
-                            | ((df['BBM'] - df['EMA9']) > (df['BBM'].shift(1) - df['EMA9'].shift(1)))))
+                         & (((((df['Open']) - df['Close']) / df['Open'])*100 > 0.55) | (df['BBL'] < df['BBL'].shift(1))
+                            | ((df['BBM'] - df['EMA9']) > (df['BBM'].shift(1) - df['EMA9'].shift(1))))
+                         & ((df['Low'] < df['Low'].shift(1)) & (((df['Low'].shift(1) - df['Low']) / df['Low'].shift(1))*100 > 0.05)) 
+                         & (df['Volume'] > df['Volume'].shift(1)))
                         | (((df['drop_down_signal_for_cond_ema_cross'].shift(1) == True) | (df['drop_down_signal_for_cond_ema_cross'].shift(2) == True)
                            | (df['drop_down_signal_for_cond_ema_cross'].shift(3) == True)) & volume_profile_red
                           & (df['BBU_Angle_Degree'] > 180) & (df['EMA_Angle_Degree'] > 185) 

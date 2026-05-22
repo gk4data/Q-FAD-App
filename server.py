@@ -2330,6 +2330,7 @@ def define_server(input, output, session):
             'New_Uptrend_Buy_Signal',
             'Downtrend_Reverse_Buy_Signal',
             'RSI_pct_buy',
+            'Opening_buy'
         ]
 
         def _signal_is_true(value):
