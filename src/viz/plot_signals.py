@@ -225,6 +225,20 @@ def plot_signals(df):
             row=1, col=1
         )
 
+   # Opening Buy Signal
+    if 'Opening_buy' in df.columns and df['Opening_buy'].any():
+        fig.add_trace(
+            go.Scatter(
+                x=x_vals[df['Opening_buy']],
+                y=df['Low'][df['Opening_buy']],  
+                mode='markers',
+                marker=dict(color='rgb(19,80,26)', size=16, symbol='triangle-up'),
+                name="Opening_buy",
+                hovertemplate='<b>Opening Buy</b><br>%{x|%Y-%m-%d %H:%M:%S}<extra></extra>'
+            ),
+            row=1, col=1
+        )
+
     # Downtrend Reverse Buy Signal
     if 'Downtrend_Reverse_Buy_Signal' in df.columns and df['Downtrend_Reverse_Buy_Signal'].any():
         fig.add_trace(
