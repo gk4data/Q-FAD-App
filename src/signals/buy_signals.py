@@ -437,7 +437,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     condition_curr_ema_near_Low & condition_curr_bbm_near_Low & condition_stoch_rsi_crossover & ema_rising_angle_degree & ema_bbm_gap_increase & BBL_angle_lower_condition
     & (bbu_rise_degree | bbm_rise_degree)  & volume_profile_green & (volume_greater_than_prev |volume_greater_than_prev_prev) #& trend_condition_not_down
     & condition_mfi_more_rsi & cond_limit_volume & condition_curr_ema_greater_than_bbm )
-    df['Mid_Buy_Signal'] = (condition_bbm_bounce & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & cond_limit_volume_4
+    
+    df['Mid_Buy_Signal'] = ((condition_bbm_bounce) & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & cond_limit_volume_4
                             & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & allowed_trade_series) & (~unstable_candle)
 
 ## overslod condition
@@ -958,12 +959,27 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                        & ((df["High"] > df["High"].shift(1)) | (df["High"] > df["High"].shift(2))))
                                      ) & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)
     
-    condition_open_buy = (((df['Open'].shift(3) < df['BBL'].shift(3)) & (df['Close'].shift(3) < df['BBL'].shift(3)))
+    condition_trend_up_cont = ((((df['Trend'].shift(3) == 'Downtrend') | (df['Trend'].shift(2) == 'Downtrend') | (df['Trend'].shift(3) == 'Flat') | (df['Trend'].shift(2) == 'Flat'))
+                                & (df['Trend'] == 'Uptrend') & (df['EMA_Trend'] == 'Uptrend')
+                                & (df['BBM_Angle_Degree'].shift(1) <= 175) & (df['BBM_Angle_Degree'].shift(2) <= 175)
+                                & (df['EMA_Angle_Degree'].shift(1) <= 175) & (df['EMA_Angle_Degree'].shift(2) <= 175)
+                                & (df['BBU_Angle_Degree'].shift(1) <= 175) & (df['BBU_Angle_Degree'].shift(2) <= 175)
+                                & (df['EMA9'].shift(1) > df['BBM'].shift(1)) & (df['EMA9'].shift(2) > df['BBM'].shift(2))
+                                & (df['Close'].shift(1) > df['BBM'].shift(1)) & (df['Close'].shift(2) > df['BBM'].shift(2))
+                                & (df['BBU_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'] < 150) & (df['BBM_Angle_Degree'] < 150)
+                                & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
+                                & (df['Volume'] > df['Volume'].shift(1)) & (df['volume_profile'] == 1)
+                                & (df['High'] > df['BBU']) & (df['BBU_Angle_Degree'] > 100)
+                                & (df['High'].shift(1).rolling(window=10).mean() < df['High']))
+                                & (range_pct <= 7.5) & (total_wick_pct <= 0.70))
+    
+    condition_open_buy = ((((df['Open'].shift(3) < df['BBL'].shift(3)) & (df['Close'].shift(3) < df['BBL'].shift(3)))
                             & (df['volume_profile'] == 1) & (df['volume_profile'].shift(1) == 1) & (df['volume_profile'].shift(2) == 1)
                             & (df['BBM_Angle_Degree'].shift(1) > df['BBM_Angle_Degree']) & (df['EMA_Angle_Degree'].shift(1) > df['EMA_Angle_Degree'])
                             & (df['Close'] < df['EMA9']) & (df['Close'] < df['BBM'])
                             & (df['Close'].shift(1) < df['Close']) & (df['Close'].shift(1) > df['Close'].shift(2)) 
-                            & (df['Date'].dt.time < pd.to_datetime('09:20:00').time()))
+                            & (df['Date'].dt.time < pd.to_datetime('09:20:00').time())) 
+                        | (condition_trend_up_cont & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)))
 
     df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
     df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover &  (df['Date'].dt.time >= pd.to_datetime('09:25:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
