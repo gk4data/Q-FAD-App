@@ -2,7 +2,7 @@
   "exchange": "NSE",
   "auto_load_instruments": true,
   "select_type": "PE",
-  "instrument": "NSE_FO|72179",
+  "instrument": "NSE_FO|72176",
   "interval": "1minute",
   "fetch_mode": "intraday",
   "start_date": "2026-05-25",

@@ -177,12 +177,13 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                 & (df.iloc[c2]['High'] > df.iloc[c2]['BBU'])
                                 & (df.iloc[c3]['High'] > df.iloc[c3]['BBU'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
 
-        no_trade_huge_down = ((((df.iloc[c1]['BBU'] - df.iloc[c930]['BBU'])/ df.iloc[c1]['BBU']) * 100 > 50)
+        no_trade_huge_down = (((((df.iloc[c1]['BBU'] - df.iloc[c930]['BBU'])/ df.iloc[c1]['BBU']) * 100 > 50)
                                 & (df.iloc[c1]['Low'] < df.iloc[c1]['BBL'])
-                                & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL'])
-                                & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
+                                & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
+                                )) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
     
     no_trade_gapup_then_fall = false_series
+    no_trade_constant_down = false_series
     if has_c3 and has_c1014:
         max_close_till_1014 = df['Close'].iloc[c1:c1014 + 1].max()
         no_trade_gapup_then_fall = ((((df.iloc[c1]['High'] - df.iloc[c1]['Low']) / df.iloc[c1]['High']) * 100 > 28)
@@ -191,6 +192,12 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                 & (df.iloc[c3]['Close'] > df.iloc[c3]['BBU']) & (df.iloc[c3]['volume_profile'] == 1)
                                 & (((max_close_till_1014 - df.iloc[c1014]['Close']) / (df.iloc[c1014]['Close'])) * 100 > 10)
                                 ) & (df['Date'].dt.time > pd.to_datetime('10:14:00').time())
+        
+        no_trade_constant_down = ((((df.iloc[c1]['BBU'] - df.iloc[c930]['BBU'])/ df.iloc[c1]['BBU']) * 100 > 70)
+                                & (df.iloc[c1]['Close'] < df.iloc[c1]['BBL']) & (df.iloc[c2]['Close'] < df.iloc[c2]['BBL'])
+                                & (df.iloc[c2]['Close'] > df.iloc[c3]['Close']) & (df.iloc[c3]['Close'] > df.iloc[c1014]['Close'])
+                                & (df.iloc[c930]['EMA9'] > df.iloc[c1014]['EMA9'])
+                                & (((max_close_till_1014 - df.iloc[c1014]['Close']) / (df.iloc[c1014]['Close'])) * 100 > 10))
         
     no_trade_gapup_then_fall_1 = false_series
     if has_c4 and has_c1014 and has_c1200:
@@ -257,11 +264,11 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         or no_trade_huge_down_at_all
     )
     effective_no_trade_gap_up_red_block = (
-        ((no_trade_gapup_then_fall | no_trade_gapup_then_fall_1 | releasable_gap_up_hard_block) & (~restart_gap_up_trade_after_t2))
+        ((no_trade_gapup_then_fall | no_trade_gapup_then_fall_1 | no_trade_constant_down | releasable_gap_up_hard_block) & (~restart_gap_up_trade_after_t2))
         | persistent_hard_block
     )
     effective_crossover_no_trade_block = (
-        ((no_trade_gapup_then_fall | no_trade_gapup_then_fall_1 | (no_trade_gap_up_red_1_at_all or no_trade_huge_opening_at_all)) & (~restart_gap_up_trade_after_t2))
+        ((no_trade_gapup_then_fall | no_trade_gapup_then_fall_1 | no_trade_constant_down | (no_trade_gap_up_red_1_at_all or no_trade_huge_opening_at_all)) & (~restart_gap_up_trade_after_t2))
         | no_trade_huge_down_at_all
     )
 
@@ -988,6 +995,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                         #     & (df['BBU_Angle_Degree'].shift(1).rolling(window=4).mean() < 150)
                         #     & (df['High'].shift(1).rolling(window=4).mean() < df['High'])
                         #     & (df['Date'].dt.time < pd.to_datetime('09:22:00').time()))
+                        
                         | (condition_trend_up_cont & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)))
 
     df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
