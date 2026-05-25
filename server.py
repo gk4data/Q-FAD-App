@@ -6,6 +6,7 @@ import logging
 import traceback
 import tempfile
 import time
+import html as _html
 import requests
 import pandas as pd
 import numpy as np
@@ -64,6 +65,9 @@ def define_server(input, output, session):
     df_data = reactive.Value(pd.DataFrame())
     backtest_summary_data = reactive.Value({})
     trades_data = reactive.Value(pd.DataFrame())
+    backtest_run_id = reactive.Value(0)
+    backtest_context = reactive.Value({})
+    backtest_result = reactive.Value(None)
     initial_cash_used = reactive.Value(100000)
     login_url = reactive.Value("")
     status_msg = reactive.Value("Starting app...")
@@ -2966,6 +2970,12 @@ def define_server(input, output, session):
             status_msg.set("[ERROR] Authenticate first before fetching data")
             return
         try:
+            backtest_summary_data.set({})
+            trades_data.set(pd.DataFrame())
+            backtest_context.set({})
+            backtest_result.set(None)
+            backtest_run_id.set(backtest_run_id.get() + 1)
+
             key = selected_instrument_key.get()
             inst_input = (input.instrument() or "").strip()
             # Prefer manual input from Data & Processing; fallback to selected key.
@@ -3121,9 +3131,53 @@ def define_server(input, output, session):
         return
 
     # ===== Backtesting =====
+    def _format_backtest_value(value):
+        if isinstance(value, (float, np.floating)):
+            if pd.isna(value) or np.isinf(value):
+                return "--"
+            return f"{value:,.2f}"
+        if isinstance(value, (int, np.integer)):
+            return f"{value:,}"
+        return str(value)
+
+    def _build_backtest_summary_html(summary, context):
+        rows = []
+        for key, value in (context or {}).items():
+            rows.append((str(key), str(value)))
+
+        if isinstance(summary, dict):
+            for key, value in summary.items():
+                rows.append((str(key), _format_backtest_value(value)))
+        else:
+            rows.append(("Summary Type", type(summary).__name__))
+            rows.append(("Summary", str(summary)))
+
+        body = "".join(
+            "<tr>"
+            f"<td style='border:1px solid #263244;padding:8px 10px;color:#dbe7ff;background:#111923;'>{_html.escape(metric)}</td>"
+            f"<td style='border:1px solid #263244;padding:8px 10px;color:#f8fafc;background:#0e151f;'>{_html.escape(value)}</td>"
+            "</tr>"
+            for metric, value in rows
+        )
+
+        return (
+            "<div style='padding:20px;background:#070b12;border:1px solid #263244;border-radius:6px;'>"
+            "<h4 style='color:#f8fafc;margin-bottom:12px;'>Backtest Results</h4>"
+            "<table style='border-collapse:collapse;width:100%;border:1px solid #263244;'>"
+            "<tbody>"
+            "<tr>"
+            "<th style='border:1px solid #263244;padding:8px 10px;color:#9fb3d9;background:#172033;'>Metric</th>"
+            "<th style='border:1px solid #263244;padding:8px 10px;color:#9fb3d9;background:#172033;'>Value</th>"
+            "</tr>"
+            f"{body}"
+            "</tbody>"
+            "</table>"
+            "</div>"
+        )
+
     @reactive.effect
     @reactive.event(input.run_backtest)
-    def _run_backtest():
+    async def _run_backtest():
         df = df_data.get()
         if df is None or df.empty:
             status_msg.set("[ERROR] Fetch & Process data first before backtesting")
@@ -3136,9 +3190,34 @@ def define_server(input, output, session):
 
             trades_df = calculate_manual_pnl(df, initial_cash=cash, commission=0.0)
             summary = get_summary_stats_manual(df, trades_df, initial_cash=cash)
+            context = {
+                "Run": backtest_run_id.get() + 1,
+                "Instrument": (selected_instrument_key.get() or input.instrument().strip()),
+                "Rows": len(df),
+                "From": _as_iso(pd.to_datetime(df["Date"], errors="coerce").min()) if "Date" in df.columns else "",
+                "To": _as_iso(pd.to_datetime(df["Date"], errors="coerce").max()) if "Date" in df.columns else "",
+            }
 
             backtest_summary_data.set(summary)
             trades_data.set(trades_df)
+            backtest_context.set(context)
+            backtest_result.set({
+                "summary": summary,
+                "trades": trades_df,
+                "context": context,
+            })
+            backtest_run_id.set(backtest_run_id.get() + 1)
+            await session.send_custom_message(
+                "set_backtest_summary",
+                {"html": _build_backtest_summary_html(summary, context)},
+            )
+            logger.info(
+                "BACKTEST_RESULT run=%s trades=%s summary_keys=%s context=%s",
+                backtest_run_id.get(),
+                len(trades_df),
+                list(summary.keys()) if isinstance(summary, dict) else type(summary).__name__,
+                context,
+            )
 
             if len(trades_df) == 0:
                 status_msg.set("[WARN] No complete trades (no matching buy/sell signal pairs)")
@@ -3506,42 +3585,81 @@ def define_server(input, output, session):
     @render.ui
     def backtest_summary():
         from shiny import ui
-        summary = backtest_summary_data.get()
+        _ = backtest_run_id.get()
+        result = backtest_result.get()
+        summary = (result or {}).get("summary") or backtest_summary_data.get()
         if not summary:
-            return ui.p("Run backtest to see results")
+            logger.info(
+                "BACKTEST_RENDER empty run_id=%s result_present=%s summary_type=%s",
+                backtest_run_id.get(),
+                result is not None,
+                type(summary).__name__,
+            )
+            return ui.div(
+                "Run backtest to see results",
+                style="padding: 14px; color: #e8e5f2; background: #101722; border: 1px solid #263244; border-radius: 6px;",
+            )
 
-        try:
-            rows = []
+        rows = []
+        context = (result or {}).get("context") or backtest_context.get() or {}
+        for k, v in context.items():
+            rows.append({"Metric": str(k), "Value": str(v)})
+
+        if isinstance(summary, dict):
             for k, v in summary.items():
-                if isinstance(v, float):
-                    formatted_v = f"{v:,.2f}"
-                elif isinstance(v, int):
+                if isinstance(v, (float, np.floating)):
+                    if pd.isna(v) or np.isinf(v):
+                        formatted_v = "--"
+                    else:
+                        formatted_v = f"{v:,.2f}"
+                elif isinstance(v, (int, np.integer)):
                     formatted_v = f"{v:,}"
                 else:
                     formatted_v = str(v)
+                rows.append({"Metric": str(k), "Value": formatted_v})
+        else:
+            rows.append({"Metric": "Summary Type", "Value": type(summary).__name__})
+            rows.append({"Metric": "Summary", "Value": str(summary)})
 
-                rows.append(
-                    ui.tags.tr(
-                        ui.tags.td(ui.strong(k + ":"), style="border: 1px solid #333; padding: 6px 8px;"),
-                        ui.tags.td(formatted_v, style="border: 1px solid #333; padding: 6px 8px;")
-                    )
-                )
-            return ui.div(
-                ui.h4("Backtest Results", style="color: #e8e5f2;"),
-                ui.tags.table(
-                    ui.tags.tbody(*rows),
-                    style="border-collapse: collapse; width: 100%; margin-top: 10px; border: 1px solid #333;",
-                ),
-                style="padding: 20px; background-color: #000; border-radius: 5px; color: #e8e5f2;"
+        logger.info(
+            "BACKTEST_RENDER run_id=%s rows=%s context=%s summary_keys=%s",
+            backtest_run_id.get(),
+            len(rows),
+            context,
+            list(summary.keys()) if isinstance(summary, dict) else type(summary).__name__,
+        )
+        table_rows = [
+            ui.tags.tr(
+                ui.tags.th("Metric", style="border: 1px solid #263244; padding: 8px 10px; color: #9fb3d9; background: #172033;"),
+                ui.tags.th("Value", style="border: 1px solid #263244; padding: 8px 10px; color: #9fb3d9; background: #172033;"),
             )
-        except Exception as e:
-            return ui.p(f"Error rendering summary: {e}")
+        ]
+        for row in rows:
+            table_rows.append(
+                ui.tags.tr(
+                    ui.tags.td(str(row["Metric"]), style="border: 1px solid #263244; padding: 8px 10px; color: #dbe7ff; background: #111923;"),
+                    ui.tags.td(str(row["Value"]), style="border: 1px solid #263244; padding: 8px 10px; color: #f8fafc; background: #0e151f;"),
+                )
+            )
+
+        return ui.div(
+            ui.h4("Backtest Results", style="color: #f8fafc; margin-bottom: 12px;"),
+            ui.tags.table(
+                ui.tags.tbody(*table_rows),
+                style="border-collapse: collapse; width: 100%; border: 1px solid #263244;",
+            ),
+            style="padding: 20px; background: #070b12; border: 1px solid #263244; border-radius: 6px;",
+        )
 
     @output
     @render.data_frame
     def trades_table():
         from shiny import render
-        trades_df = trades_data.get()
+        _ = backtest_run_id.get()
+        result = backtest_result.get()
+        trades_df = (result or {}).get("trades") if result else None
+        if trades_df is None:
+            trades_df = trades_data.get()
         if trades_df is None or trades_df.empty:
             return render.DataTable(pd.DataFrame({"Message": ["No trades executed"]}))
 
@@ -3576,7 +3694,11 @@ def define_server(input, output, session):
     @output
     @render_plotly
     def trades_backtest_plot():
-        trades_df = trades_data.get()
+        _ = backtest_run_id.get()
+        result = backtest_result.get()
+        trades_df = (result or {}).get("trades") if result else None
+        if trades_df is None:
+            trades_df = trades_data.get()
         cash = float(initial_cash_used.get() or 100000)
         try:
             return plot_backtest_overview(trades_df, initial_cash=cash)

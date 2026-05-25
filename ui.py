@@ -292,7 +292,7 @@ def create_main_ui():
             ui.div(
                 ui.navset_tab(
                     ui.nav_panel(ui.HTML("<i class='bi bi-graph-up'></i> Chart"), ui.div(output_widget("price_plot"), class_="chart-container")),
-                    ui.nav_panel(ui.HTML("<i class='bi bi-bar-chart'></i> Backtest"), ui.div(ui.output_ui("backtest_summary"), style="padding:16px;")),
+                    ui.nav_panel(ui.HTML("<i class='bi bi-bar-chart'></i> Backtest"), ui.div(ui.output_ui("backtest_summary"), id="backtest_summary_host", style="padding:16px;")),
                     ui.nav_panel(
                         ui.HTML("<i class='bi bi-receipt'></i> Trades"),
                         ui.div(
@@ -454,6 +454,14 @@ def create_app_ui():
                             }
                         }, 180);
                     }, durationMs);
+                });
+
+                Shiny.addCustomMessageHandler("set_backtest_summary", function(message) {
+                    const host = document.getElementById("backtest_summary_host");
+                    if (!host) {
+                        return;
+                    }
+                    host.innerHTML = message && message.html ? String(message.html) : "";
                 });
                 """
             ),
