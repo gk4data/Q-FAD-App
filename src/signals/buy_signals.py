@@ -779,7 +779,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     | ### this need to be tested how its working 
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
                                     |
-                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
+                                    (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle) & (upper_wick_pct <= 0.60))
                                     |
                                     (uptrend_sell_heppened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
@@ -897,7 +897,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                       & (df["EMA9"] < df["Close"]) & (df['EMA_Angle_Degree'].shift(1) < 160) & (df['EMA_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'].shift(3) < 160)
                                       & (df['EMA_Angle_Degree'].shift(4) < 160) & (df['EMA9'] > df['BBM']) & ((df['BBU_Angle_Degree'] > 100) | ((df["BBU"] < df["Close"]))) & (df['volume_profile'] == 1) & ~(no_trade_on_expiry_after_13)
                                     )
-                                    ## bottelnech stong upp from downtrend  
+                                    # bottelnech stong upp from downtrend  
                                     | 
                                     ((((df['EMA_Trend'].shift(2) == 'Downtrend') & (df['Trend'].shift(2) == 'Downtrend'))
                                       | ((df['EMA_Trend'].shift(1) == 'Downtrend') & (df['Trend'].shift(1) == 'Downtrend'))
@@ -931,7 +931,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     & (df['BBU_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'] < 150) & (df['BBM_Angle_Degree'] < 170)
                                     & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df['volume_profile'] == 1)
                                     & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & (df["BBU"] < df["High"])
-                                    & (df['BBU_Angle_Degree'] > 100)
+                                    & (df['BBU_Angle_Degree'] > 100) & (range_pct <= 7.5) & (upper_wick_pct <= 0.60)
                                     )
     ) & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)
 
