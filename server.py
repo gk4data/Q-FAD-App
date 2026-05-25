@@ -1366,9 +1366,8 @@ def define_server(input, output, session):
             available_expiries.set(expiries)
             selected_symbol.set(symbol)
         except Exception as e:
-            # Keep prior selector state on transient fetch failures so controls don't get stuck blank.
+            available_expiries.set([])
             logger.exception("Error fetching expiries: %s", e)
-            status_msg.set(f"[WARN] Could not refresh expiries for {symbol}: {e}")
 
     @output
     @render.ui
@@ -1418,9 +1417,8 @@ def define_server(input, output, session):
             available_strikes.set(strikes)
             selected_expiry.set(expiry)
         except Exception as e:
-            # Keep prior selector state on transient fetch failures so controls don't get stuck blank.
+            available_strikes.set([])
             logger.exception("Error fetching strikes: %s", e)
-            status_msg.set(f"[WARN] Could not refresh strikes for {symbol} {expiry}: {e}")
 
     @output
     @render.ui
@@ -1477,15 +1475,6 @@ def define_server(input, output, session):
             if key:
                 selected_instrument_key.set(key)
                 selected_strike.set(strike_val if instr_type != 'FUT' else None)
-                # Re-sync expiry/strike lists for the latest symbol/type after apply.
-                try:
-                    refreshed_expiries = instrument_manager.get_expiry_dates(symbol, instrument_type=instr_type)
-                    if refreshed_expiries:
-                        available_expiries.set(refreshed_expiries)
-                    refreshed_strikes = instrument_manager.get_strikes(symbol, expiry, instr_type)
-                    available_strikes.set(refreshed_strikes if refreshed_strikes else [])
-                except Exception as refresh_err:
-                    logger.warning("Post-apply selector refresh skipped: %s", refresh_err)
                 try:
                     ui.update_text("instrument", value=key, session=session)
                     logger.debug("ui.update_text instrument=%s", key)
