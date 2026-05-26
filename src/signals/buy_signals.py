@@ -994,11 +994,19 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                         #     & (df['BBU_Angle_Degree'].shift(1).rolling(window=4).mean() < 150)
                         #     & (df['High'].shift(1).rolling(window=4).mean() < df['High'])
                         #     & (df['Date'].dt.time < pd.to_datetime('09:22:00').time()))
-                        
                         | (condition_trend_up_cont & ~(triple_bbu__red_exhaustion) & ~(triple_bbl__red_exhaustion) & (~effective_crossover_no_trade_block)))
 
     df['condition_supreme_low_crossover'] = condition_supreme_low_crossover &  (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
-    df['condition_ema_bbu_crossover'] = condition_ema_bbu_crossover &  (df['Date'].dt.time >= pd.to_datetime('09:25:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
+    
+    ema_bbu_t0_had_signal = bool((condition_ema_bbu_crossover & t0_window & time_window).any())
+    ema_bbu_t1_had_signal = bool((condition_ema_bbu_crossover & t1_window & time_window).any())
+    ema_bbu_t2_had_signal = bool((condition_ema_bbu_crossover & t2_window & time_window).any())
+    ema_bbu_allow_t3_from_prior_legs = ema_bbu_t0_had_signal or ema_bbu_t1_had_signal or ema_bbu_t2_had_signal
+
+    expiry_day_ema_bbu_t3_gate = (~is_expiry_day) | ((~t3_window) | ema_bbu_allow_t3_from_prior_legs)
+    df['condition_ema_bbu_crossover'] = (condition_ema_bbu_crossover & (df['Date'].dt.time >= pd.to_datetime('09:25:00').time())
+                                         & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & expiry_day_ema_bbu_t3_gate)
+
     df['Super_Low_Buy_Signal'] = condition_super_low_buy  & (~unstable_candle) & trade_allowed
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2  & (~unstable_candle) & trade_allowed
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & (~unstable_candle) & allowed_trade_series 
