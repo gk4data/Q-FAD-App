@@ -9,5 +9,7 @@
   "end_date": "2026-05-26",
   "auto_save": true,
   "save_dir": "",
-  "select_symbol": "NIFTY"
+  "select_symbol": "NIFTY",
+  "select_expiry": "2026-05-26",
+  "select_strike": "20100"
 }
