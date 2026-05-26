@@ -3142,15 +3142,16 @@ def define_server(input, output, session):
 
     def _build_backtest_summary_html(summary, context):
         rows = []
-        for key, value in (context or {}).items():
-            rows.append((str(key), str(value)))
-
         if isinstance(summary, dict):
             for key, value in summary.items():
                 rows.append((str(key), _format_backtest_value(value)))
         else:
             rows.append(("Summary Type", type(summary).__name__))
             rows.append(("Summary", str(summary)))
+        if context:
+            rows.append(("Session Context", ""))
+        for key, value in (context or {}).items():
+            rows.append((str(key), str(value)))
 
         body = "".join(
             "<tr>"
@@ -3602,9 +3603,6 @@ def define_server(input, output, session):
 
         rows = []
         context = (result or {}).get("context") or backtest_context.get() or {}
-        for k, v in context.items():
-            rows.append({"Metric": str(k), "Value": str(v)})
-
         if isinstance(summary, dict):
             for k, v in summary.items():
                 if isinstance(v, (float, np.floating)):
@@ -3620,6 +3618,10 @@ def define_server(input, output, session):
         else:
             rows.append({"Metric": "Summary Type", "Value": type(summary).__name__})
             rows.append({"Metric": "Summary", "Value": str(summary)})
+        if context:
+            rows.append({"Metric": "Session Context", "Value": ""})
+        for k, v in context.items():
+            rows.append({"Metric": str(k), "Value": str(v)})
 
         logger.info(
             "BACKTEST_RENDER run_id=%s rows=%s context=%s summary_keys=%s",
