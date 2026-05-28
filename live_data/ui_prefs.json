@@ -1,15 +1,15 @@
 {
   "exchange": "NSE",
   "auto_load_instruments": true,
-  "select_type": "PE",
-  "instrument": "NSE_FO|72176",
+  "select_type": "CE",
+  "instrument": "NSE_FO|40088",
   "interval": "1minute",
-  "fetch_mode": "intraday",
-  "start_date": "2026-05-26",
-  "end_date": "2026-05-26",
+  "fetch_mode": "date_range",
+  "start_date": "2026-05-28",
+  "end_date": "2026-05-28",
   "auto_save": true,
   "save_dir": "",
   "select_symbol": "NIFTY",
-  "select_expiry": "2026-05-26",
-  "select_strike": "23900"
+  "select_expiry": "2026-06-02",
+  "select_strike": "21100"
 }
