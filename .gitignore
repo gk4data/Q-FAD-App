@@ -53,6 +53,8 @@ credentials.json
 .cache/
 tmp_exports/
 live_data/*.csv
+live_data/live_data_ltpc.csv
+live_data/ui_prefs.json
 live_data/sandbox_token.json
 !live_data/.gitkeep
 
@@ -67,6 +69,7 @@ htmlcov/
 
 # Logs
 *.log
+live_data/broker_communications.log*
 
 # OS
 Thumbs.db
