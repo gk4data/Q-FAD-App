@@ -141,7 +141,6 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                               & ((((df['Open'] - df['Close']) / df['Open'])*100) >= 0.25)
                               & ((df['EMA9'] > df['BBM']) & (((df['EMA9'] - df['BBM'])/df['EMA9'])*100 <= 0.35)))
                              
-    
     downtrend_ema_sell_signal = (
                                 ((df['EMA_Trend'] == 'Downtrend') & (df['Trend'] == 'Downtrend') & (df['regime'] == 'downtrend') & (df['volume_profile'] == 0)
                                 & ((df['Close'].shift(1) >= df['EMA9'].shift(1)) 
@@ -309,7 +308,13 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                            | (df['drop_down_signal_for_cond_ema_cross'].shift(3) == True)) & volume_profile_red
                           & (df['BBU_Angle_Degree'] > 180) & (df['EMA_Angle_Degree'] > 185) 
                           & (df['Close'] < df['EMA9']) & ((df['Close'] < df['BBM'])))
-                        )
+                        | (((df['Opening_buy'].shift(2) == True) | (df['Opening_buy'].shift(3) == True))
+                          & volume_profile_red
+                          & (df['BBU_Angle_Degree'] > 250) & (df['EMA_Angle_Degree'] > 250)
+                          & (df['Low'].shift(1).rolling(window=3).mean() > df['Low'])
+                          & (df['Low'] < df['Low'].shift(1)) & (df['Low'] < df['Low'].shift(2)))
+                          )
+
     
     take_profit_sell = (((df['Trend'] == 'Uptrend') 
                       & (df['BBU_Angle_Degree'] > 175) & (df['EMA_Angle_Degree'] > 180)
