@@ -724,6 +724,21 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                 &  (((((df['Open'] - df['Close']))/df['Open']))*100 > 0.05)
                 & (((((df['BBM'] - df['Low']))/df['BBM']))*100 > 0.50))
     
+    exit_at_top = (((df['Trend'] == 'Uptrend')
+                    & (df['volume_profile'] == 0) & (df['BBU_Angle_Degree'] < 120)
+                    & (((((df['Open']) - df['Close']) / df['Open'])*100 > 1.60) | ((df['Open'] < df['BBU']) & (df['Close'] < df['BBU'])) | ((df['Open'] > df['BBU']) & (df['Close'] > df['BBU'])))
+                    & (((((df['High'].shift(1) - df['Close'].shift(1))/ df['High'].shift(1))*100) >= 3.5) 
+                    | ((((df['BBU'].shift(1) - df['Close'].shift(1))/ df['BBU'].shift(1))*100) <= 1.2))
+                    & ((((df['High'].shift(1) - df['BBU'].shift(1))/ df['High'].shift(1))*100) >= 4.5))                 
+                    | ((df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'] < 120) & (df['BBU_Angle_Degree']  < 120)
+                      & ((df['BBL_Angle_Degree']  < 130) | (df['BBL_Angle_Degree'].shift(1)  < 130))
+                      & (df['BBU_Angle_Degree'] > df['BBU_Angle_Degree'].shift(1)) & (df['volume_profile'] == 0)
+                      & (((((df['Open']) - df['Close']) / df['Open'])*100 > 1.60)))
+                    | ((df['Trend'] == 'Uptrend') & (df['EMA_Angle_Degree'] > 190) & (df['EMA_Angle_Degree'].shift(1)  > 190)
+                    & (df['High'].shift(1).rolling(window=3).mean() > df['High']) & (df['volume_profile'] == 0)
+                    & (df['Low'].shift(1) > df['Low'])  & (df['Low'].shift(2) > df['Low'])
+                    & ((df['Close'] < df['BBM']) & (df['Close'] < df['EMA9']))))
+    
     alt_sell = (((((df['RSI_hi'].shift(1) < df['RSI'].shift(1)) | (df['RSI_hi'].shift(2) < df['RSI'].shift(2)))
                    & (df['RSI_hi'] > df['RSI']) & (df['RSI_pct']*100 < df['RSI']) & (df['Low'].shift(1) > df['Low']) 
                    & (df['Low'].shift(2) > df['Low']) & (df['volume_profile'] == 0) & (df['EMA9'] > df['Low']) & (df['MFI_pct']*100 <= 50))
@@ -759,6 +774,17 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     & (df['EMA9'] > df['BBM']) & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 160) 
                                     & (df['EMA_Angle_Degree'] < 160) & (df['EMA_Angle_Degree'].shift(1) < 180)
                                 ) 
+    
+    exit_at_top_happened_recently = ((((exit_at_top.shift(2, fill_value=False)) & (df['Close'].shift(2) < df['EMA9'].shift(2)))
+                                     | ((exit_at_top.shift(3, fill_value=False)) & (df['Close'].shift(3) < df['EMA9'].shift(3)))
+                                     | ((exit_at_top.shift(1, fill_value=False)) & (df['Close'].shift(1) < df['EMA9'].shift(1))))
+                                    & ((df['High'] > df['BBU']) | ((df['Open'] > df['EMA9']) & (df['Open'] > df['BBM'])))
+                                    & (df['Close'].shift(1) < df['Close']) & (df['volume_profile'].shift(1) == 1)
+                                    & (df['EMA9'] > df['BBM']) & (df['volume_profile'] == 1) & (df['BBU_Angle_Degree'] <= 140) 
+                                    & (df['EMA_Angle_Degree'] < 140) & (df['EMA_Angle_Degree'].shift(1) < 160)
+                                    & (df['EMA_Angle_Degree'].shift(1) > df['EMA_Angle_Degree'])
+                                    & (df['BBU_Angle_Degree'].shift(1) > df['BBU_Angle_Degree'])
+                                    & (df['BBL'].shift(1) > df['BBL']))
 
     uptrend_sell_heppened_recently = ((uptrend_sell.shift(2, fill_value=False)| uptrend_sell.shift(3, fill_value=False) | uptrend_sell.shift(4, fill_value=False))
                                     & ((df['High'] > df['High'].shift(1)) | (df['High'] > df['High'].shift(2))) 
@@ -796,6 +822,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     first_bbu_breakout_after_low ## after every low, previous green candle below BBL and current candle closes above BBU
                                     |
                                     (mfi_exit_happened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle) & (upper_wick_pct <= 0.60))
+                                    |
+                                    (exit_at_top_happened_recently & ~(no_trade_on_expiry_after_13) & (upper_wick_pct <= 0.60))
                                     |
                                     (uptrend_sell_heppened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
