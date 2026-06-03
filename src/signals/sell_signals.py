@@ -304,10 +304,16 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                            | (df['drop_down_signal_for_cond_ema_cross'].shift(3) == True)) & volume_profile_red
                           & (df['BBU_Angle_Degree'] > 180) & (df['EMA_Angle_Degree'] > 185) 
                           & (df['Close'] < df['EMA9']) & ((df['Close'] < df['BBM'])))
-                        | (((df['drop_down_signal_for_cond_ema_cross'].shift(1) == True) | (df['drop_down_signal_for_cond_ema_cross'].shift(2) == True)
-                           | (df['drop_down_signal_for_cond_ema_cross'].shift(3) == True)) & volume_profile_red
-                          & (df['BBU_Angle_Degree'] > 180) & (df['EMA_Angle_Degree'] > 185) 
-                          & (df['Close'] < df['EMA9']) & ((df['Close'] < df['BBM'])))
+                        | ((((df['condition_supreme_low_crossover'].shift(1) == True) 
+                            & ((df['Close'].shift(1) > df['EMA9'].shift(1)) & (df['Close'].shift(2) > df['EMA9'].shift(2)) 
+                               & (df['Close'].shift(3) > df['EMA9'].shift(3))
+                               & (df['High'] > df['BBU']) & (df['regime'] == 'sideways')).shift(1) == True) 
+                            | ((df['condition_supreme_low_crossover'].shift(2) == True)
+                              & ((df['Close'].shift(1) > df['EMA9'].shift(1)) & (df['Close'].shift(2) > df['EMA9'].shift(2)) 
+                                 & (df['Close'].shift(3) > df['EMA9'].shift(3))
+                                 & (df['High'] > df['BBU']) & (df['regime'] == 'sideways')).shift(2) == True))
+                          & volume_profile_red & (df['Close'] < df['Close'].shift(1)) & (df['EMA_Angle_Degree'] > df['EMA_Angle_Degree'].shift(1))
+                          & (df['Low'] < df['Low'].shift(1)) & (df['Low'] < df['Low'].shift(2)))
                         | (((df['Opening_buy'].shift(2) == True) | (df['Opening_buy'].shift(3) == True))
                           & volume_profile_red
                           & (df['BBU_Angle_Degree'] > 250) & (df['EMA_Angle_Degree'] > 250)
