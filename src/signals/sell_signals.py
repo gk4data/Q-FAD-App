@@ -104,6 +104,7 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                                         & (((df['EMA9'] > df['BBM']) & (((df['EMA9'] - df['BBM'])/df['EMA9'])*100 > 0.30)) | (df['EMA9'] < df['BBM']))
                                         & (df['BBU_Angle_Degree'].shift(1) < df['BBU_Angle_Degree'])
                                         & ((((df['Open'] - df['Close'])/ df['Open'])*100) >= 1.6)
+                                        & ((((df['BBM'] - df['Close'])/ df['BBM'])*100) >= 0.45)
                                         & (df['High'] < df['BBU'])#& (df['regime'] != 'downtrend')
                                         )
     
