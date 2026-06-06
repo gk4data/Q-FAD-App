@@ -140,7 +140,19 @@ def generate_sell_signals(df: pd.DataFrame) -> pd.DataFrame:
                               & (df['BBU_Angle_Degree'].shift(1) < df['BBU_Angle_Degree']) & (df['BBL_Angle_Degree'].shift(1) > df['BBL_Angle_Degree'])
                               & (df['EMA9'].shift(1) > (df['EMA9'])) & (df['Low'].shift(1).rolling(window=3).mean() > df['Low'])
                               & ((((df['Open'] - df['Close']) / df['Open'])*100) >= 0.25)
-                              & ((df['EMA9'] > df['BBM']) & (((df['EMA9'] - df['BBM'])/df['EMA9'])*100 <= 0.35)))
+                              & ((df['EMA9'] > df['BBM']) & (((df['EMA9'] - df['BBM'])/df['EMA9'])*100 <= 0.35))
+                              |
+                              (((((df['High'].shift(6) > df['BBU'].shift(6)) & (df['volume_profile'].shift(6) == 1)) & ((df['High'].shift(5) > df['BBU'].shift(5)) & (df['volume_profile'].shift(5) == 0)))
+                                | (((df['High'].shift(7) > df['BBU'].shift(7)) & (df['volume_profile'].shift(7) == 1)) & ((df['High'].shift(6) > df['BBU'].shift(6)) & (df['volume_profile'].shift(6) == 0)))
+                                | (((df['High'].shift(5) > df['BBU'].shift(5)) & (df['volume_profile'].shift(5) == 1)) & ((df['High'].shift(4) > df['BBU'].shift(4)) & (df['volume_profile'].shift(4) == 0))))
+                               & (df['Close'] < df['EMA9']) & (df['Close'] < df['BBM']) & (df['Close'].shift(1) < df['EMA9'].shift(1))
+                               & volume_profile_red 
+                               & (df['BBU_Angle_Degree'] > 200) & (df['BBU_Angle_Degree'].shift(1) > 200) & (df['BBU_Angle_Degree'].shift(2) > 200) 
+                               & (df['EMA_Angle_Degree'] > 200) & (df['BBM_Angle_Degree'] > df['BBM_Angle_Degree'].shift(1))
+                               & ((df['EMA9'] - df['BBM']) < (df['EMA9'].shift(1) - df['BBM'].shift(1)))
+                               & ((df['EMA9'].shift(2) - df['BBM'].shift(2)) > (df['EMA9'].shift(1) - df['BBM'].shift(1)))
+                              )
+                              )
                              
     downtrend_ema_sell_signal = (
                                 ((df['EMA_Trend'] == 'Downtrend') & (df['Trend'] == 'Downtrend') & (df['regime'] == 'downtrend') & (df['volume_profile'] == 0)
