@@ -678,6 +678,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     last_low_idx = row_idx_series.where(is_new_running_low).groupby(trading_day).ffill()
     ema_cross_up_bbm = (df["EMA9"] > df["BBM"]) & (df["EMA9"].shift(1) > df["BBM"].shift(1)) & (df["EMA9"].shift(2) <= df["BBM"].shift(2)) 
     after_low = row_idx_series > last_low_idx
+    # Only allow the EMA cross in the next 10 candles after the most recent low.
+    after_low_within_10 = after_low & (row_idx_series <= (last_low_idx + 10))
     low_cycle = is_new_running_low.groupby(trading_day).cumsum()
     regime_filter = (df['regime'] == 'sideways')
     trend_filter = (df['Trend'] == 'Flat')
@@ -686,7 +688,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     ema_cross_after_low_setup = (ema_cross_up_bbm & after_low & (df['Date'].dt.time >= pd.to_datetime('09:16:00').time()) 
         & (df['BBU_Angle_Degree'] >= 100) & (df['BBU_Angle_Degree'] <= 170) & (df['EMA_Angle_Degree'] < 170) & (df['BBU_Angle_Degree'].shift(1) < 250)
         & ~((df['High'].shift(1) > df['BBU'].shift(1)) & (df['High'] < df['BBU']))
-        & (df['BBU_Angle_Degree'].shift(2) < 250) & ~(trend_skipping) & ~(no_trade_on_expiry_after_13))
+        & (df['BBU_Angle_Degree'].shift(2) < 250) & ~(trend_skipping) & ~(no_trade_on_expiry_after_13)
+        & after_low_within_10)
     first_ema_cross_after_low = ema_cross_after_low_setup & ema_cross_after_low_setup.groupby([trading_day, low_cycle]).cumsum().eq(1)
 
     bbu_breakout_after_low_setup = (after_low & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) #& (df['Close'].shift(1) > df['Open'].shift(1))
@@ -836,8 +839,6 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                     |
                                     (exit_at_top_happened_recently & ~(no_trade_on_expiry_after_13) & (upper_wick_pct <= 0.60))
                                     |
-                                    # (exit_at_top_happened_recently_2 & ~(no_trade_on_expiry_after_13) & (upper_wick_pct <= 0.60))
-                                    # |
                                     (uptrend_sell_heppened_recently & ~(no_trade_on_expiry_after_13) & (~unstable_candle))
                                     |
                                     ((alt_sell_heppened_recently) & ~(no_trade_on_expiry_after_13))
@@ -1023,7 +1024,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                         (df["High"].shift(5) > df["EMA9"].shift(5))))
                                     & (df["High"] > df["High"].shift(1).rolling(6).mean())                                   
                                     & (df['BBU_Angle_Degree'] < 150) & (df['EMA_Angle_Degree'] < 150) & (df['BBM_Angle_Degree'] < 170)
-                                    & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df['volume_profile'] == 1)
+                                    & (df["EMA9"] < df["Close"]) & (df["BBM"] < df["Close"]) & (df["BBM"] < df["EMA9"]) & (df['volume_profile'] == 1)
                                     & (total_wick_pct <= 0.80) & (lower_wick_pct <= 0.67) & (df["BBU"] < df["High"])
                                     & (df['BBU_Angle_Degree'] > 100) & (range_pct <= 7.5) & (upper_wick_pct <= 0.60)
                                     )
