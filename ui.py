@@ -316,6 +316,7 @@ def create_main_ui():
                             ui.div(ui.output_text_verbatim("historical_backtest_status"), class_="order-history-status"),
                             ui.div(ui.output_ui("historical_backtest_summary"), class_="order-history-status"),
                             ui.div(ui.output_data_frame("historical_backtest_table"), class_="order-history-table-wrap"),
+                            id="historical_backtest_capture",
                             class_="order-history-panel",
                         ),
                     ),
@@ -368,6 +369,7 @@ def create_app_ui():
     return ui.page_fluid(
         ui.tags.head(
             ui.tags.link(rel="stylesheet", href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"),
+            ui.tags.script(src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"),
             ui.include_css("static/theme.css"),
             ui.tags.script(
                 """
@@ -381,6 +383,32 @@ def create_app_ui():
                         }
                     };
                     window.setTimeout(triggerClick, delayMs);
+                });
+
+                Shiny.addCustomMessageHandler("trigger_historical_screenshot", function(message) {
+                    const targetId = message && message.id ? message.id : "historical_backtest_capture";
+                    const filename = message && message.filename ? String(message.filename) : "historical_backtest.png";
+                    const delayMs = message && message.delay_ms ? Number(message.delay_ms) : 400;
+                    const target = document.getElementById(targetId);
+                    if (!target || typeof html2canvas === "undefined") {
+                        return;
+                    }
+
+                    window.setTimeout(function() {
+                        html2canvas(target, {
+                            backgroundColor: "#0f172a",
+                            scale: 2,
+                            useCORS: true,
+                            logging: false
+                        }).then(function(canvas) {
+                            const link = document.createElement("a");
+                            link.download = filename;
+                            link.href = canvas.toDataURL("image/png");
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        });
+                    }, delayMs);
                 });
 
                 Shiny.addCustomMessageHandler("show_toast", function(message) {

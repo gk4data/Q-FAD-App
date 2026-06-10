@@ -132,6 +132,7 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
     """
     Enhanced summary statistics with advanced trading ratios.
     """
+    hard_stop_loss_pct = 15.0
     buy_hold = ((df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1) * 100 if len(df) > 1 else 0
 
     if trades_df.empty:
@@ -148,6 +149,7 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
             'Expectancy per Trade [%]': 0.0,
             'Avg Win [%]': 0.0,
             'Avg Loss [%]': 0.0,
+            'Risk-Reward Ratio': 0.0,
             'Payoff Ratio': 0.0,
             'Sharpe Ratio': 0.0,
             'Sortino Ratio': 0.0,
@@ -184,6 +186,8 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
     avg_win = winning_returns.mean() if len(winning_returns) > 0 else 0
     avg_loss = losing_returns.mean() if len(losing_returns) > 0 else 0
     profit_factor = (winning_returns.sum() / abs(losing_returns.sum())) if len(losing_returns) > 0 else np.inf
+    # We do not model a take-profit, so this is a realized reward vs fixed 15% stop-loss proxy.
+    risk_reward_ratio = (abs(avg_win) / hard_stop_loss_pct) if avg_win != 0 else 0.0
 
     # Expectancy per trade
     p_win = win_rate / 100
@@ -225,9 +229,10 @@ def get_summary_stats_manual(df, trades_df, initial_cash=100000.0, risk_free_rat
         'Win Rate [%]': round(win_rate, 2),
         '# Trades': int(total_trades),
         'Profit Factor': round(profit_factor, 3),
-        'Expectancy per Trade [%]': round(expectancy, 3),
         'Avg Win [%]': round(avg_win, 3),
         'Avg Loss [%]': round(avg_loss, 3),
+        'Risk-Reward Ratio': round(risk_reward_ratio, 3),
+        'Expectancy per Trade [%]': round(expectancy, 3),
         'Payoff Ratio': round(abs(avg_win / avg_loss), 3) if avg_loss != 0 else np.inf,
         'Sharpe Ratio': round(sharpe, 3),
         'Sortino Ratio': round(sortino, 3),
