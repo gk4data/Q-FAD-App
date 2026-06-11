@@ -3513,10 +3513,10 @@ def define_server(input, output, session):
             "Profit Factor",
             "Risk-Reward Ratio",
             "Expectancy per Trade (%)",
-            "Best Trade (%)",
-            "Worst Trade (%)",
             "Winning Trades",
             "Losing Trades",
+            "Best Trade (%)",
+            "Worst Trade (%)",
         ]
         existing_preferred = [c for c in preferred_cols if c in out_df.columns]
         extra_cols = [c for c in out_df.columns if c not in existing_preferred]
@@ -3555,7 +3555,9 @@ def define_server(input, output, session):
             {
                 "id": "historical_backtest_capture",
                 "filename": f"historical_backtest_{start_iso}_{end_iso}.png",
-                "delay_ms": 700,
+                "delay_ms": 1200,
+                "retry_delay_ms": 350,
+                "max_attempts": 12,
             },
         )
 
