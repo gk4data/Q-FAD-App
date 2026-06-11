@@ -477,6 +477,7 @@ table {
   background: linear-gradient(180deg, rgba(20, 28, 39, 0.88), rgba(13, 19, 28, 0.88));
   border: 1px solid var(--border-subtle);
   border-radius: 14px;
+  min-height: 280px;
 }
 
 .order-history-actions {

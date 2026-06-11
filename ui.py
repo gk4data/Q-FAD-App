@@ -316,6 +316,7 @@ def create_main_ui():
                             ui.div(ui.output_text_verbatim("historical_backtest_status"), class_="order-history-status"),
                             ui.div(ui.output_ui("historical_backtest_summary"), class_="order-history-status"),
                             ui.div(ui.output_data_frame("historical_backtest_table"), class_="order-history-table-wrap"),
+                            id="historical_backtest_capture",
                             class_="order-history-panel",
                         ),
                     ),
@@ -368,6 +369,7 @@ def create_app_ui():
     return ui.page_fluid(
         ui.tags.head(
             ui.tags.link(rel="stylesheet", href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"),
+            ui.tags.script(src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"),
             ui.include_css("static/theme.css"),
             ui.tags.script(
                 """
@@ -381,6 +383,109 @@ def create_app_ui():
                         }
                     };
                     window.setTimeout(triggerClick, delayMs);
+                });
+
+                Shiny.addCustomMessageHandler("trigger_historical_screenshot", function(message) {
+                    const targetId = message && message.id ? message.id : "historical_backtest_capture";
+                    const filename = message && message.filename ? String(message.filename) : "historical_backtest.png";
+                    const delayMs = message && message.delay_ms ? Number(message.delay_ms) : 400;
+                    const retryDelayMs = message && message.retry_delay_ms ? Number(message.retry_delay_ms) : 300;
+                    const maxAttempts = message && message.max_attempts ? Number(message.max_attempts) : 10;
+                    const minWidth = message && message.min_width ? Number(message.min_width) : 200;
+                    const minHeight = message && message.min_height ? Number(message.min_height) : 120;
+                    if (typeof html2canvas === "undefined") {
+                        return;
+                    }
+
+                    const sleep = function(ms) {
+                        return new Promise(function(resolve) {
+                            window.setTimeout(resolve, ms);
+                        });
+                    };
+
+                    const afterPaint = function() {
+                        return new Promise(function(resolve) {
+                            window.requestAnimationFrame(function() {
+                                window.requestAnimationFrame(resolve);
+                            });
+                        });
+                    };
+
+                    const isReady = function(target) {
+                        if (!target) {
+                            return false;
+                        }
+                        const rect = target.getBoundingClientRect();
+                        const style = window.getComputedStyle(target);
+                        return (
+                            rect.width >= minWidth &&
+                            rect.height >= minHeight &&
+                            style.display !== "none" &&
+                            style.visibility !== "hidden"
+                        );
+                    };
+
+                    const captureWhenReady = async function() {
+                        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                            const target = document.getElementById(targetId);
+                            if (!target) {
+                                await sleep(retryDelayMs);
+                                continue;
+                            }
+
+                            if (document.fonts && document.fonts.ready) {
+                                try {
+                                    await document.fonts.ready;
+                                } catch (err) {
+                                    console.warn("Historical screenshot font wait failed", err);
+                                }
+                            }
+
+                            await afterPaint();
+
+                            if (!isReady(target)) {
+                                await sleep(retryDelayMs);
+                                continue;
+                            }
+
+                            try {
+                                const canvas = await html2canvas(target, {
+                                    backgroundColor: "#0f172a",
+                                    scale: 2,
+                                    useCORS: true,
+                                    logging: false,
+                                    scrollX: 0,
+                                    scrollY: -window.scrollY,
+                                    windowWidth: target.scrollWidth,
+                                    windowHeight: target.scrollHeight
+                                });
+
+                                if (!canvas || canvas.width < 2 || canvas.height < 2) {
+                                    throw new Error("Empty screenshot canvas");
+                                }
+
+                                const link = document.createElement("a");
+                                link.download = filename;
+                                link.href = canvas.toDataURL("image/png");
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                return;
+                            } catch (err) {
+                                console.warn("Historical screenshot attempt failed", { attempt: attempt + 1, err });
+                                await sleep(retryDelayMs);
+                            }
+                        }
+
+                        console.error("Historical screenshot aborted after retries", {
+                            targetId: targetId,
+                            filename: filename
+                        });
+                    };
+
+                    window.setTimeout(function() {
+                        void captureWhenReady();
+                    }, delayMs);
                 });
 
                 Shiny.addCustomMessageHandler("show_toast", function(message) {

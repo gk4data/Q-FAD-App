@@ -860,6 +860,18 @@ def define_server(input, output, session):
         except Exception:
             return np.nan
 
+    def _compute_historical_risk_reward(returns_series: pd.Series, hard_stop_loss_pct: float = 15.0) -> float:
+        """
+        Risk-reward is defined the same way in both the summary card and the TOTAL row:
+        average positive session return divided by the fixed stop-loss proxy.
+        """
+        numeric_returns = pd.to_numeric(returns_series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        positive_returns = numeric_returns[numeric_returns > 0]
+        if positive_returns.empty:
+            return 0.0
+        pos_mean = positive_returns.mean()
+        return round(float(abs(pos_mean) / hard_stop_loss_pct), 2) if pd.notna(pos_mean) else 0.0
+
     def _build_historical_backtest_summary_df(df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame(columns=["Metric", "Value"])
@@ -884,6 +896,9 @@ def define_server(input, output, session):
         total_pnl_pct = (total_return_amount / total_invested) * 100.0 if total_invested > 0 else 0.0
         total_return_on_capital_pct = (total_return_amount / base_capital) * 100.0 if base_capital > 0 else 0.0
 
+        hard_stop_loss_pct = 15.0
+        risk_reward_ratio = _compute_historical_risk_reward(work["Return (%)"], hard_stop_loss_pct)
+
         comp_capital = base_capital
         if "Side" in work.columns:
             side_order = {"CE": 0, "PE": 1}
@@ -904,6 +919,7 @@ def define_server(input, output, session):
                 {"Metric": "Total Invested", "Value": round(total_invested, 2)},
                 {"Metric": "Total Return Amount", "Value": round(total_return_amount, 2)},
                 {"Metric": "Average Session PnL %", "Value": round(total_pnl_pct, 2)},
+                {"Metric": "Risk-Reward Ratio", "Value": risk_reward_ratio},
                 {"Metric": "Return on Base Capital %", "Value": round(total_return_on_capital_pct, 2)},
                 {"Metric": "Compounding Final Capital", "Value": round(comp_capital, 2)},
                 {"Metric": "Compounding Final Return", "Value": round(comp_final_return, 2)},
@@ -3358,6 +3374,7 @@ def define_server(input, output, session):
                         metrics_row["Win Rate (%)"] = float(summary.get("Win Rate [%]", 0.0) or 0.0)
                         metrics_row["Max Drawdown (%)"] = float(summary.get("Max Drawdown [%]", 0.0) or 0.0)
                         metrics_row["Profit Factor"] = float(summary.get("Profit Factor", 0.0) or 0.0)
+                        metrics_row["Risk-Reward Ratio"] = float(summary.get("Risk-Reward Ratio", 0.0) or 0.0)
                         metrics_row["Best Trade (%)"] = float(summary.get("Best Trade [%]", 0.0) or 0.0)
                         metrics_row["Worst Trade (%)"] = float(summary.get("Worst Trade [%]", 0.0) or 0.0)
                         metrics_row["Winning Trades"] = int(summary.get("Winning Trades", 0) or 0)
@@ -3410,6 +3427,7 @@ def define_server(input, output, session):
             "Win Rate (%)",
             "Max Drawdown (%)",
             "Profit Factor",
+            "Risk-Reward Ratio",
             "Best Trade (%)",
             "Worst Trade (%)",
         ]:
@@ -3462,6 +3480,8 @@ def define_server(input, output, session):
         ).replace([np.inf, -np.inf], np.nan).dropna()
         total_profit_factor = round(float(pf_series.mean()), 2) if not pf_series.empty else 0.0
 
+        total_risk_reward = _compute_historical_risk_reward(out_df.loc[valid_total_mask, "Return (%)"] if "Return (%)" in out_df.columns else pd.Series(dtype=float))
+
         exp_series = pd.to_numeric(out_df.get("Expectancy per Trade (%)", 0.0), errors="coerce").fillna(0.0)
         trades_series = pd.to_numeric(out_df.get("Trades", 0), errors="coerce").fillna(0.0)
         total_expectancy = round(float((exp_series * trades_series).sum() / total_trades), 2) if total_trades > 0 else 0.0
@@ -3474,12 +3494,13 @@ def define_server(input, output, session):
         total_row["Win Rate (%)"] = total_win_rate
         total_row["Max Drawdown (%)"] = total_max_drawdown
         total_row["Profit Factor"] = total_profit_factor
+        total_row["Risk-Reward Ratio"] = total_risk_reward
         total_row["Winning Trades"] = total_win
         total_row["Losing Trades"] = total_loss
         total_row["Expectancy per Trade (%)"] = total_expectancy
-        out_df = pd.concat([out_df, pd.DataFrame([total_row])], ignore_index=True)
+        out_df = pd.concat([pd.DataFrame([total_row]), out_df], ignore_index=True)
 
-        # Keep expectancy as the last column
+        # Keep expectancy near the other core trade-quality KPIs
         preferred_cols = [
             "Date",
             "Side",
@@ -3490,11 +3511,12 @@ def define_server(input, output, session):
             "Win Rate (%)",
             "Max Drawdown (%)",
             "Profit Factor",
-            "Best Trade (%)",
-            "Worst Trade (%)",
+            "Risk-Reward Ratio",
+            "Expectancy per Trade (%)",
             "Winning Trades",
             "Losing Trades",
-            "Expectancy per Trade (%)",
+            "Best Trade (%)",
+            "Worst Trade (%)",
         ]
         existing_preferred = [c for c in preferred_cols if c in out_df.columns]
         extra_cols = [c for c in out_df.columns if c not in existing_preferred]
@@ -3529,8 +3551,14 @@ def define_server(input, output, session):
             },
         )
         await session.send_custom_message(
-            "trigger_download",
-            {"id": "download_historical_backtest_excel", "delay_ms": 300},
+            "trigger_historical_screenshot",
+            {
+                "id": "historical_backtest_capture",
+                "filename": f"historical_backtest_{start_iso}_{end_iso}.png",
+                "delay_ms": 1200,
+                "retry_delay_ms": 350,
+                "max_attempts": 12,
+            },
         )
 
     # ===== Chart Visualization =====
@@ -3862,7 +3890,7 @@ def define_server(input, output, session):
             styles.append({"cols": ["Side"], "rows": side_s.eq("CE").tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
             styles.append({"cols": ["Side"], "rows": side_s.eq("PE").tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
 
-        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Expectancy per Trade (%)"]:
+        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Expectancy per Trade (%)", "Risk-Reward Ratio"]:
             if col in df.columns:
                 s = pd.to_numeric(df[col], errors="coerce")
                 styles.append({"cols": [col], "rows": s.gt(0).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
