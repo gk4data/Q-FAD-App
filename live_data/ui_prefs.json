@@ -1,7 +1,7 @@
 {
   "exchange": "NSE",
   "auto_load_instruments": true,
-  "select_type": "PE",
+  "select_type": "CE",
   "instrument": "NSE_FO|50575",
   "interval": "1minute",
   "fetch_mode": "intraday",
