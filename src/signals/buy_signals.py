@@ -28,16 +28,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     if df.empty:
         return df
 
-    # Save incoming dataframe to project folder for debugging/export
-    try:
-        out_dir = Path.cwd() / "tmp_exports"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = out_dir / f"buy_signals_input_{ts}.xlsx"
-        # Use to_excel so it's easy to open in Excel
-        df.to_excel(out_path, index=False)
-    except Exception as _e:
-        print(f"[WARN] Could not save buy_signals input: {_e}")
+    # (Removed debug export to tmp_exports to avoid saving raw input here)
 
     required = [
         'RSI', 'STOCHRSIk', 'STOCHRSId', 'BBM_Angle', 'Volume', 'Date', 'High',

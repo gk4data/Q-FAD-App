@@ -3120,11 +3120,14 @@ def define_server(input, output, session):
             df = calculate_indicators(raw_df)
             df = detect_regimes_relaxed(df)
             df = classify_trend_by_angles(df)
-            df = add_long_signal(df, expiry_date=input.select_expiry())
-            
-            # Filter back to current day only
+
+            # Filter back to current day only before running signal generators
             status_msg.set(f"[INFO] Filtering to current day data only...")
             df = filter_to_current_day(df, target_date_str)
+
+            # Run signal generation on current-day-only dataframe so generators
+            # (e.g. generate_buy_signals) don't see previous-day warmup rows.
+            df = add_long_signal(df, expiry_date=input.select_expiry())
             
             df_data.set(df)
 
