@@ -2,14 +2,14 @@
   "exchange": "NSE",
   "auto_load_instruments": true,
   "select_type": "CE",
-  "instrument": "NSE_FO|50575",
+  "instrument": "NSE_FO|42284",
   "interval": "1minute",
-  "fetch_mode": "intraday",
-  "start_date": "2026-03-10",
-  "end_date": "2026-03-10",
+  "fetch_mode": "expired",
+  "start_date": "2026-06-09",
+  "end_date": "2026-06-09",
   "auto_save": true,
   "save_dir": "",
   "select_symbol": "NIFTY",
   "select_expiry": "2026-06-16",
-  "select_strike": "23400"
+  "select_strike": "21200"
 }
