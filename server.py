@@ -192,15 +192,6 @@ def define_server(input, output, session):
         days_until_tuesday = (1 - d.weekday()) % 7
         return d + timedelta(days=days_until_tuesday)
 
-    def _next_available_expiry_for_day(trade_day: _date, expiry_list: list[_date]) -> str | None:
-        """Pick the nearest available expiry on/after trade day from instrument master."""
-        if not expiry_list:
-            return None
-        for ex in expiry_list:
-            if ex >= trade_day:
-                return ex.strftime("%Y-%m-%d")
-        return None
-
     def _resolve_historical_option_contract(
         access_token: str,
         symbol: str,
@@ -211,47 +202,19 @@ def define_server(input, output, session):
     ) -> tuple[str | None, str | None, str]:
         """Resolve a contract for historical backtests.
 
-        Uses the current instrument master when it contains a valid expiry for the trade day,
-        otherwise falls back to Upstox expired-contract lookup around the expected weekly expiry.
+        Prefer the historical week's expected expiry first, then fall back to the expired-contract
+        API when that contract is no longer present in the current instrument master.
         """
-        max_master_expiry_gap_days = 9
-        expiry_dates: list[_date] = []
+        expiry_iso = _next_tuesday_for(trade_day).strftime("%Y-%m-%d")
+
+        # First try the exact historical weekly expiry in the current instrument master.
+        # This works when the expiry is still present in the active master.
         try:
-            expiries_raw = instrument_manager.get_expiry_dates(symbol, instrument_type=instrument_type)
-            expiry_dates = sorted(
-                [
-                    _dt.strptime(str(e), "%Y-%m-%d").date()
-                    for e in (expiries_raw or [])
-                    if e is not None and str(e).strip() != ""
-                ]
-            )
+            base_inst = instrument_manager.get_instrument_key(symbol, expiry_iso, strike, instrument_type)
+            if base_inst:
+                return str(base_inst), expiry_iso, "instrument_master"
         except Exception:
-            expiry_dates = []
-
-        expiry_iso = _next_available_expiry_for_day(trade_day, expiry_dates)
-        if expiry_iso:
-            try:
-                expiry_dt = _dt.strptime(expiry_iso, "%Y-%m-%d").date()
-                expiry_gap_days = (expiry_dt - trade_day).days
-            except Exception:
-                expiry_gap_days = None
-
-            if expiry_gap_days is not None and 0 <= expiry_gap_days <= max_master_expiry_gap_days:
-                try:
-                    base_inst = instrument_manager.get_instrument_key(symbol, expiry_iso, strike, instrument_type)
-                    if base_inst:
-                        return str(base_inst), expiry_iso, "instrument_master"
-                except Exception:
-                    pass
-            else:
-                logger.info(
-                    "Skipping instrument-master expiry %s for %s %s on %s because gap=%s days",
-                    expiry_iso,
-                    symbol,
-                    instrument_type,
-                    trade_day.strftime("%Y-%m-%d"),
-                    expiry_gap_days,
-                )
+            pass
 
         underlying_key = _resolve_underlying_index_key(symbol, exchange=exchange)
         if not underlying_key:
@@ -3307,6 +3270,8 @@ def define_server(input, output, session):
                 metrics_row = {
                     "Date": day_iso,
                     "Side": side,
+                    "Expiry": "",
+                    "Resolution Source": "",
                     "Instrument Key": "",
                     "Trades": 0,
                     "Return (%)": 0.0,
@@ -3332,6 +3297,8 @@ def define_server(input, output, session):
                     if not base_inst:
                         rows.append(metrics_row)
                         continue
+                    metrics_row["Expiry"] = expiry_iso or ""
+                    metrics_row["Resolution Source"] = resolution_source
                     metrics_row["Instrument Key"] = str(base_inst)
 
                     day_df, fetch_mode_used = _fetch_option_history_for_backtest(

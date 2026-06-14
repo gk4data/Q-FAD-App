@@ -868,7 +868,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                         & (df['EMA_Trend'].shift(1) == 'Uptrend') & (df['Trend'].shift(1) == 'Uptrend')
                                         & (df['EMA_Trend'] == 'Uptrend') & (df['Trend'] == 'Uptrend')
                                         & (df['Date'].dt.time <= pd.to_datetime('14:38:00').time())
-                                        ## & (df['High'].shift(1) < df['BBU'].shift(1))
+                                        # & (df['High'].shift(1) < df['BBU'].shift(1))
                                     )
                                     # same as new uptrend signal when trend continue in uptrend 
                                     |
@@ -1188,10 +1188,10 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         & (df['Date'].dt.time >= pd.to_datetime('09:32:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()))
                                    
     df['condition_supreme_low_crossover'] = (cond_vwap_reclaim_confirmed | (condition_supreme_low_crossover & (df['Date'].dt.time > pd.to_datetime('09:29:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())))
-    
-    ema_bbu_t0_had_signal = bool((condition_ema_bbu_crossover & t0_window & time_window).any())
-    ema_bbu_t1_had_signal = bool((condition_ema_bbu_crossover & t1_window & time_window).any())
-    ema_bbu_t2_had_signal = bool((condition_ema_bbu_crossover & t2_window & time_window).any())
+    time_window_1 = (df['Date'].dt.time > pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time())
+    ema_bbu_t0_had_signal = bool((condition_ema_bbu_crossover & t0_window & time_window_1).any())
+    ema_bbu_t1_had_signal = bool((condition_ema_bbu_crossover & t1_window & time_window_1).any())
+    ema_bbu_t2_had_signal = bool((condition_ema_bbu_crossover & t2_window & time_window_1).any())
     ema_bbu_allow_t3_from_prior_legs = ema_bbu_t0_had_signal or ema_bbu_t1_had_signal or ema_bbu_t2_had_signal
 
     expiry_day_ema_bbu_t3_gate = (~is_expiry_day) | ((~t3_window) | ema_bbu_allow_t3_from_prior_legs)
