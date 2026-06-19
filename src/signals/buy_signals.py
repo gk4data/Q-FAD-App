@@ -114,17 +114,20 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     c3 = first_pos + 2
     c4 = first_pos + 3
     c5 = first_pos + 4
+    c6 = first_pos + 5
     c930 = first_pos + 14  # 9:30 is 15 minutes after 9:15, so +14 from the first candle (0-based index)
     c1014 = first_pos + 59  # 10:14 is 59 minutes after 9:15
     c1200 = first_pos + 104 # 12:00 is 105 minutes after 9:15
     false_series = pd.Series(False, index=df.index)
     has_c3 = c3 < len(df)
     has_c4 = c4 < len(df)
+    has_c5 = c5 < len(df)
+    has_c6 = c6 < len(df)
     has_c930 = c930 < len(df)
     has_c1014 = c1014 < len(df)
     has_c1200 = c1200 < len(df)
 
-    if has_c4:
+    if has_c5:
         green_continuation = (
             (first_volume_profile == 0) and
             (df.iloc[c2]['volume_profile'] == 1) and
@@ -175,6 +178,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     
     no_trade_huge_opening = false_series
     no_trade_huge_down = false_series
+    no_trade_mega_gap_down = false_series
     if has_c3 and has_c930:
         no_trade_huge_opening = ((((df.iloc[c930]['BBU'] - df.iloc[c1]['BBU'])/ df.iloc[c930]['BBU']) * 100 > 40)
                                 & (df.iloc[c1]['High'] > df.iloc[c1]['BBU'])
@@ -184,6 +188,11 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         no_trade_huge_down = (((((df.iloc[c1]['BBU'] - df.iloc[c930]['BBU'])/ df.iloc[c1]['BBU']) * 100 > 50)
                                 & (df.iloc[c1]['Low'] < df.iloc[c1]['BBL'])
                                 & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c3]['Low'] < df.iloc[c3]['BBL'])
+                                )) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
+        
+        no_trade_mega_gap_down = (((((df.iloc[c6]['BBU'] - df.iloc[c6]['BBL'])/ df.iloc[c6]['BBU']) * 100 > 75)
+                                & (df.iloc[c1]['Close'] > df.iloc[c930]['Close']) & (df.iloc[c1]['Close'] > df.iloc[c930 -1]['Close'])
+                                & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c1]['Low'] < df.iloc[c1]['BBL'])
                                 )) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
     
     no_trade_gapup_then_fall = false_series
@@ -214,7 +223,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                 & (df.iloc[c930]['Close'] > df.iloc[c1014]['Close']) & (df.iloc[c1]['Close'] > df.iloc[c930]['Close'])
                                 & (df.iloc[c1200]['Close'] < df.iloc[c1014]['Close'])
                                 ) & (df['Date'].dt.time >= pd.to_datetime('22:00:00').time())
-
+          
     
     # Hard blocker: if gap-up-red pattern is seen, do not trade at all.
     no_trade_gap_up_red_at_all = bool(no_trade_gap_up_red.any())
@@ -223,6 +232,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     no_trade_gap_up_red_1_at_all = bool(no_trade__on_gap_up_red.any())
     no_trade_huge_opening_at_all = bool(no_trade_huge_opening.any())
     no_trade_huge_down_at_all = bool(no_trade_huge_down.any())
+    no_trade_mega_gap_down_at_all = bool(no_trade_mega_gap_down.any())
 
    # time windows for applying each checkpoint rule
     t0_window = (df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time <= pd.to_datetime('10:14:00').time())
@@ -266,7 +276,9 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     persistent_hard_block = (
         no_trade_gap_down_green_at_all
         or no_trade_huge_down_at_all
+        or no_trade_mega_gap_down_at_all
     )
+    
     effective_no_trade_gap_up_red_block = (
         ((no_trade_gapup_then_fall | no_trade_gapup_then_fall_1 | no_trade_constant_down | releasable_gap_up_hard_block) & (~restart_gap_up_trade_after_t2))
         | persistent_hard_block
@@ -917,7 +929,25 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                       & (df['Close'] > df['Close'].shift(1)) & (df['Close'].shift(1) > df['Close'].shift(2)) & (df['Close'].shift(2) > df['Close'].shift(3))
                                       & (df['EMA_Angle_Degree'].shift(1) < 160) & (df['EMA9'] > df['BBM']) & (df['EMA_Angle_Degree'] < 160)
                                       & (df['BBU_Angle_Degree'] < 160) & (df["BBU"] < df["Close"])
-                                    ) 
+                                    )
+                                    | 
+                                    ((((df['Low'].shift(4) < df['BBL'].shift(4)) & (df['EMA_Trend'].shift(4) == 'Downtrend') & (df['Trend'].shift(4) == 'Downtrend') & (df['regime'].shift(4) == 'downtrend'))
+                                      | ((df['Low'].shift(5) < df['BBL'].shift(5)) & (df['EMA_Trend'].shift(5) == 'Downtrend') & (df['Trend'].shift(5) == 'Downtrend') & (df['regime'].shift(5) == 'downtrend'))
+                                      | ((df['Low'].shift(3) < df['BBL'].shift(3)) & (df['EMA_Trend'].shift(3) == 'Downtrend') & (df['Trend'].shift(3) == 'Downtrend') & (df['regime'].shift(3) == 'downtrend')))
+                                     & ((df['EMA_Trend'] != 'Downtrend') | (df['Trend'] != 'Downtrend') | (df['regime'] != 'downtrend'))
+                                     & ((df['EMA_Angle_Degree'].shift(2).rolling(window=7).mean() > 205) | (df['EMA_Angle_Degree'].shift(2).rolling(window=6).mean() > 205))
+                                     & ((df['BBL_Angle_Degree'].shift(2).rolling(window=7).mean() > 205) | (df['BBL_Angle_Degree'].shift(2).rolling(window=6).mean() > 205))
+                                     & ((df['EMA_Angle_Degree'].rolling(window=3).mean() < 170) | (df['EMA_Angle_Degree'].rolling(window=2).mean() < 155))
+                                     & (df['Close'].shift(1) < df['Close']) & (df['Close'].shift(1) > df['Close'].shift(2)) 
+                                     & (df['volume_profile'] == 1) & (df['volume_profile'].shift(1) == 1) & (df['volume_profile'].shift(2) == 1)
+                                     & (df['EMA_Angle_Degree'] < 155) 
+                                     & ((df['High'].shift(1).rolling(window=6).mean() < df['High']) | (df['High'].shift(1).rolling(window=7).mean() < df['High']))
+                                     & (df['BBM_Angle_Degree'].shift(1) > df['BBM_Angle_Degree'])
+                                     & (df['Close'] > df['EMA9']) & (df['Close'] > df['BBM'])
+                                     & (df['Low'].shift(1) < df['EMA9'].shift(1)) & (df['Low'].shift(1) < df['BBM'].shift(1))
+                                     & ((df['BBM'].shift(6) > df['EMA9'].shift(6)) | (df['BBM'].shift(5) > df['EMA9'].shift(5)))
+                                     & (((df['High'] > df['High'].shift(1))) | ((df['High'] > df['High'].shift(2))))
+                                    )
                                     |
                                     ## ema9 above close but below bbm in past 5-6 candles with current ema9 crossing above bbm with close below bbm in past 5-6 candles 
                                     ##only in uptrend and with strong angle of ema and bbm to avoid false signal in sideways market, can give good signal in case of strong pullback in uptrend 

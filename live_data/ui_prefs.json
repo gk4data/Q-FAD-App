@@ -2,7 +2,7 @@
   "exchange": "NSE",
   "auto_load_instruments": true,
   "select_type": "CE",
-  "instrument": "NSE_FO|56376",
+  "instrument": "NSE_FO|56372",
   "interval": "1minute",
   "fetch_mode": "intraday",
   "start_date": "2026-06-18",
@@ -11,5 +11,5 @@
   "save_dir": "",
   "select_symbol": "NIFTY",
   "select_expiry": "2026-06-23",
-  "select_strike": "24100"
+  "select_strike": "24000"
 }
