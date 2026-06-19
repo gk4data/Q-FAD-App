@@ -425,6 +425,50 @@ def create_app_ui():
                         );
                     };
 
+                    const prepareCloneForFullWidthCapture = function(sourceTarget) {
+                        const captureRoot = sourceTarget.cloneNode(true);
+                        captureRoot.style.position = "fixed";
+                        captureRoot.style.left = "-100000px";
+                        captureRoot.style.top = "0";
+                        captureRoot.style.zIndex = "2147483647";
+                        captureRoot.style.pointerEvents = "none";
+                        captureRoot.style.width = "max-content";
+                        captureRoot.style.maxWidth = "none";
+                        captureRoot.style.overflow = "visible";
+                        captureRoot.style.background = "#0f172a";
+
+                        const widenNode = function(node) {
+                            if (!node || !node.style) {
+                                return;
+                            }
+                            node.style.overflow = "visible";
+                            node.style.overflowX = "visible";
+                            node.style.overflowY = "visible";
+                            node.style.width = "max-content";
+                            node.style.maxWidth = "none";
+                            node.style.height = "auto";
+                            node.style.maxHeight = "none";
+                        };
+
+                        captureRoot.querySelectorAll(".dataTables_wrapper, .dataTables_scroll, .dataTables_scrollHead, .dataTables_scrollBody, .table-responsive").forEach(widenNode);
+                        captureRoot.querySelectorAll(".dataTables_scrollHeadInner").forEach(function(node) {
+                            if (node && node.style) {
+                                node.style.paddingRight = "0";
+                                node.style.width = "max-content";
+                                node.style.maxWidth = "none";
+                            }
+                        });
+                        captureRoot.querySelectorAll("table").forEach(function(node) {
+                            if (node && node.style) {
+                                node.style.width = "max-content";
+                                node.style.minWidth = "100%";
+                                node.style.tableLayout = "auto";
+                            }
+                        });
+
+                        return captureRoot;
+                    };
+
                     const captureWhenReady = async function() {
                         for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
                             const target = document.getElementById(targetId);
@@ -448,16 +492,32 @@ def create_app_ui():
                                 continue;
                             }
 
+                            const captureRoot = prepareCloneForFullWidthCapture(target);
+                            document.body.appendChild(captureRoot);
+
                             try {
-                                const canvas = await html2canvas(target, {
+                                await afterPaint();
+
+                                const captureWidth = Math.max(
+                                    captureRoot.scrollWidth || 0,
+                                    captureRoot.getBoundingClientRect().width || 0,
+                                    target.scrollWidth || 0
+                                );
+                                const captureHeight = Math.max(
+                                    captureRoot.scrollHeight || 0,
+                                    captureRoot.getBoundingClientRect().height || 0,
+                                    target.scrollHeight || 0
+                                );
+
+                                const canvas = await html2canvas(captureRoot, {
                                     backgroundColor: "#0f172a",
-                                    scale: 2,
+                                    scale: 1,
                                     useCORS: true,
                                     logging: false,
                                     scrollX: 0,
                                     scrollY: -window.scrollY,
-                                    windowWidth: target.scrollWidth,
-                                    windowHeight: target.scrollHeight
+                                    windowWidth: captureWidth,
+                                    windowHeight: captureHeight
                                 });
 
                                 if (!canvas || canvas.width < 2 || canvas.height < 2) {
@@ -474,6 +534,10 @@ def create_app_ui():
                             } catch (err) {
                                 console.warn("Historical screenshot attempt failed", { attempt: attempt + 1, err });
                                 await sleep(retryDelayMs);
+                            } finally {
+                                if (captureRoot && captureRoot.parentNode) {
+                                    captureRoot.parentNode.removeChild(captureRoot);
+                                }
                             }
                         }
 

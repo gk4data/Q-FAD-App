@@ -214,16 +214,33 @@ def fetch_intraday_data(
         "Content-Type": "application/json",
     }
     
+    # Log outgoing request (instrument key only)
     try:
+        print(f"[INFO] Requesting Upstox instrument: {instrument_code}")
         r = requests.get(url, headers=headers, timeout=30)
         r.raise_for_status()
     except requests.exceptions.HTTPError as e:
         # Print response body for debugging
         print(f"HTTP Error: {e}")
-        print(f"Response: {r.text}")
+        try:
+            print(f"Response: {r.text}")
+        except Exception:
+            pass
         raise
     
-    data = r.json().get("data", {})
+    # Log incoming response instrument key if present
+    resp_json = r.json()
+    data = resp_json.get("data", {})
+    incoming_instrument = (
+        data.get("instrument")
+        or data.get("instrumentKey")
+        or data.get("instrument_key")
+        or resp_json.get("instrument")
+        or resp_json.get("instrumentKey")
+        or None
+    )
+    if incoming_instrument:
+        print(f"[INFO] Response instrument key: {incoming_instrument}")
     candles = data.get("candles", [])
     if not candles:
         return pd.DataFrame(columns=["Date","Open","High","Low","Close","Volume"])

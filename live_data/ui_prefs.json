@@ -1,15 +1,15 @@
 {
   "exchange": "NSE",
   "auto_load_instruments": true,
-  "select_type": "PE",
-  "instrument": "NSE_FO|50562",
+  "select_type": "CE",
+  "instrument": "NSE_FO|56372",
   "interval": "1minute",
   "fetch_mode": "intraday",
-  "start_date": "2026-06-11",
-  "end_date": "2026-06-11",
+  "start_date": "2026-06-18",
+  "end_date": "2026-06-18",
   "auto_save": true,
   "save_dir": "",
   "select_symbol": "NIFTY",
-  "select_expiry": "2026-06-16",
-  "select_strike": "23100"
+  "select_expiry": "2026-06-23",
+  "select_strike": "24000"
 }
