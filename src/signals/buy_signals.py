@@ -630,7 +630,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                   | ((df['Trend'].shift(3) == 'Downtrend') &  ((df['EMA_Trend'].shift(3) == 'Downtrend') | (df['EMA_Trend'].shift(3) == 'Flat')) 
                                      & (df['regime'].shift(3) == 'downtrend') & (df['Close'].shift(3) < df['EMA9'].shift(3)) & (df['Low'].shift(3) < df['BBL'].shift(3)))
                                   | ((df['Trend'].shift(4) == 'Downtrend') &  ((df['EMA_Trend'].shift(4) == 'Downtrend') | (df['EMA_Trend'].shift(4) == 'Flat')) 
-                                     & (df['regime'].shift(4) == 'downtrend') & (df['Close'].shift(4) < df['EMA9'].shift(4)) & (df['Low'].shift(4) < df['BBL'].shift(4))) 
+                                     & (df['regime'].shift(4) == 'downtrend') & (df['Close'].shift(4) < df['EMA9'].shift(4)) & (df['Low'].shift(4) < df['BBL'].shift(4)))
                                   | ((df['Trend'].shift(5) == 'Downtrend') &  ((df['EMA_Trend'].shift(5) == 'Downtrend') | (df['EMA_Trend'].shift(5) == 'Flat')) 
                                      & (df['regime'].shift(5) == 'downtrend') & (df['Close'].shift(5) < df['EMA9'].shift(5)) & (df['Low'].shift(5) < df['BBL'].shift(5)))
                                   | ((df['Trend'].shift(1) == 'Downtrend') &  ((df['EMA_Trend'].shift(1) == 'Downtrend') | (df['EMA_Trend'].shift(1) == 'Flat')) 
@@ -638,7 +638,8 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                   & (df['High'] < df['BBU']) & (df['EMA_Angle_Degree'] < 180)
                                   & ((df['ADX'] >= 16) | ((df['Low'].shift(1).rolling(window=6).mean() < df['Low']) | (df['Low'].shift(1).rolling(window=7).mean() < df['Low'])))    
                                   & ((df['BBU_Angle_Degree'] < df['BBU_Angle_Degree'].shift(1)) | (df['BBL_Angle_Degree'] < df['BBL_Angle_Degree'].shift(1))) 
-                                  & (df['Close'] > df['EMA9']) & (df['volume_profile'] == 1) & (df['Low'] < df['EMA9']))
+                                  & (df['Close'] > df['EMA9']) & (df['volume_profile'] == 1) & (df['regime'] != 'sideways')
+                                  & (df['Low'] < df['EMA9']))
                                   | 
                                   ((prev_close_less_bbl_4 | prev_close_less_bbl_5 | prev_close_less_bbl_6) & trend_down_and_rising
                                   & (df['EMA_Angle_Degree'].shift(1) < 160) & (df['EMA_Angle_Degree'].shift(2) < 180) & (df['EMA_Angle_Degree'] < 160)
@@ -1262,7 +1263,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     df['condition_ema_bbu_crossover'] = (condition_ema_bbu_crossover & (df['Date'].dt.time >= pd.to_datetime('09:25:00').time())
                                          & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & expiry_day_ema_bbu_t3_gate)
 
-    df['Super_Low_Buy_Signal'] = condition_super_low_buy  & (~unstable_candle) & trade_allowed
+    df['Super_Low_Buy_Signal'] = condition_super_low_buy  & (~unstable_candle) & trade_allowed & (df['volume_profile'] == 2)
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2  & (~unstable_candle) & trade_allowed
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & (~unstable_candle) & allowed_trade_series 
     df['RSI_pct_buy'] = RSI_pct_buy_signal  & (~unstable_candle) & trade_allowed
