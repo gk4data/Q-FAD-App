@@ -141,20 +141,6 @@ def plot_signals(df):
             row=1, col=1
         )
 
-    # Super Low Buy Signal
-    if 'Super_Low_Buy_Signal' in df.columns and df['Super_Low_Buy_Signal'].any():
-        fig.add_trace(
-            go.Scatter(
-                x=x_vals[df['Super_Low_Buy_Signal']],
-                y=df['Low'][df['Super_Low_Buy_Signal']],  
-                mode='markers',
-                marker=dict(color='Brown', size=16, symbol='triangle-up'),
-                name="Super_Low_Buy_Signal",
-                hovertemplate='<b>Super Low Buy</b><br>%{x|%Y-%m-%d %H:%M:%S}<extra></extra>'
-            ),
-            row=1, col=1
-        )
-
     # Mid Buy Signal 2
     if 'Mid_Buy_Signal_2' in df.columns and df['Mid_Buy_Signal_2'].any():
         fig.add_trace(

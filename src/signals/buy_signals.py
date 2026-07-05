@@ -503,20 +503,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                         & cond_normal_trend &  (df['BB_trend'].shift(1) == 'bearish') & (df['EMA_Angle_Degree'] < 150))
 
 
-    ## new super low buy condition
-    round_ema_more_than_bbm = (round(df['EMA9'],1) >= round(df['BBM'],1))
-    condtion_high_low_bbu = (df['High'] <= df['BBU'])
     cond_ema_angle_more_bbm = (df['BBM_Angle'] <= df['EMA_Angle'])
- 
-    trend_cond_super_low = ((((df['Trend'] == 'Uptrend') & (((df['RSI_pct'] >= df['MFI_pct']) & (df['High'] > df['High'].shift(1))
-                                & (df['MFI_pct'] >= df['MFI_pct'].shift(1)))| (df['RSI_pct']*100 >  df['RSI_hi']))))
-                            | (((df['Trend'] == 'Downtrend') | (df['Trend'] == 'Flat')) & ((df['BBU_Angle_Degree'].shift(1) < 240))
-                             & ((df['Close'] < df['High'].shift(2)) & (df['Close'] > df['Close'].shift(1)) &
-                             (((df['High'].shift(1) > df['High']) & (((df['High'].shift(1) - df['High']) / df['High'].shift(1) * 100) < 0.20)) 
-                            | ((df['High'] > df['High'].shift(1)) & ((((df['High'] - df['High'].shift(1)) / df['High']) * 100) > 0.25)))))) & (df['EMA_Angle_Degree'] <= 188)
-                    
-
-    condition_super_low_buy = ((prev_close_less_ema_bbm   &  round_ema_more_than_bbm  & volume_profile_green & not_extreme_bbu &  condtion_high_low_bbu)) & trend_cond_super_low
     
     trend_cond_super_low_2 = (((df['Trend'] == 'Uptrend') & (df['Low'] <= df['EMA9']))
                             | (((df['Trend'] == 'Downtrend')) 
@@ -1263,7 +1250,6 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     df['condition_ema_bbu_crossover'] = (condition_ema_bbu_crossover & (df['Date'].dt.time >= pd.to_datetime('09:25:00').time())
                                          & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & expiry_day_ema_bbu_t3_gate)
 
-    df['Super_Low_Buy_Signal'] = condition_super_low_buy  & (~unstable_candle) & trade_allowed & (df['volume_profile'] == 2)
     df['Super_Low_Buy_Signal_2'] = condition_super_low_buy_2  & (~unstable_candle) & trade_allowed
     df['Mid_Buy_Signal_2'] = condition_mid_buy_2 & (df['Date'].dt.time >= pd.to_datetime('09:18:00').time()) & (df['Date'].dt.time < pd.to_datetime('15:15:00').time()) & (~unstable_candle) & allowed_trade_series 
     df['RSI_pct_buy'] = RSI_pct_buy_signal  & (~unstable_candle) & trade_allowed

@@ -310,18 +310,6 @@ Typical ingredients:
 
 This is effectively an internal-strength rotation signal.
 
-### 6.6 `Super_Low_Buy_Signal`
-
-This family looks for deeper pullback recovery entries.
-
-Typical ingredients:
-
-- price resetting into EMA / BBM / BBL areas
-- supportive trend context or recovery from a locally depressed state
-- price not yet in an extreme blow-off shape
-- controlled candle body and volume behavior
-
-Compared with `Buy_Signal`, this family is more “buying weakness that is stabilizing” than “buying obvious breakout strength.”
 
 ### 6.7 `Super_Low_Buy_Signal_2`
 
@@ -607,7 +595,6 @@ Backtest considers a long entry true if any of these are true:
 - `Mid_Buy_Signal_2`
 - `OverSold_Buy_Signal`
 - `RSI_Range_Buy_Signal`
-- `Super_Low_Buy_Signal`
 - `Super_Low_Buy_Signal_2`
 - `condition_supreme_low_crossover`
 - `New_Uptrend_Buy_Signal`

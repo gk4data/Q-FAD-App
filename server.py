@@ -2306,7 +2306,6 @@ def define_server(input, output, session):
             'Mid_Buy_Signal_2',
             'OverSold_Buy_Signal',
             'RSI_Range_Buy_Signal',
-            'Super_Low_Buy_Signal',
             'Super_Low_Buy_Signal_2',
             'condition_supreme_low_crossover',
             'condition_ema_bbu_crossover',

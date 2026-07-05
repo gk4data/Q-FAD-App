@@ -40,7 +40,7 @@ def make_base_df(n=40):
 def test_generate_buy_signals_creates_columns():
     df = make_base_df()
     out = generate_buy_signals(df)
-    for col in ['Buy_Signal', 'Mid_Buy_Signal', 'OverSold_Buy_Signal', 'RSI_Range_Buy_Signal', 'Super_Low_Buy_Signal', 'Mid_Buy_Signal_2']:
+    for col in ['Buy_Signal', 'Mid_Buy_Signal', 'OverSold_Buy_Signal', 'RSI_Range_Buy_Signal', 'Mid_Buy_Signal_2']:
         assert col in out.columns
         assert out[col].dtype == 'bool'
 
