@@ -81,3 +81,4 @@ live_data_websocket.csv
 historical_orders.csv
 vc_redist*.exe
 vc_redist*.log
+live_data/ui_prefs.json
