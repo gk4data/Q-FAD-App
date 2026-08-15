@@ -116,6 +116,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     c5 = first_pos + 4
     c6 = first_pos + 5
     c930 = first_pos + 14  # 9:30 is 15 minutes after 9:15, so +14 from the first candle (0-based index)
+    c925 = first_pos + 10  # 9:25 is 14 minutes after 9:15, so +13 from the first candle (0-based index)
     c1014 = first_pos + 59  # 10:14 is 59 minutes after 9:15
     c1200 = first_pos + 104 # 12:00 is 105 minutes after 9:15
     false_series = pd.Series(False, index=df.index)
@@ -179,6 +180,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     no_trade_huge_opening = false_series
     no_trade_huge_down = false_series
     no_trade_mega_gap_down = false_series
+    no_trade_mega_gap_down2 = false_series
     if has_c3 and has_c930:
         no_trade_huge_opening = ((((df.iloc[c930]['BBU'] - df.iloc[c1]['BBU'])/ df.iloc[c930]['BBU']) * 100 > 40)
                                 & (df.iloc[c1]['High'] > df.iloc[c1]['BBU'])
@@ -194,6 +196,12 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
                                 & (df.iloc[c1]['Close'] > df.iloc[c930]['Close']) & (df.iloc[c1]['Close'] > df.iloc[c930 -1]['Close'])
                                 & (df.iloc[c2]['Low'] < df.iloc[c2]['BBL']) & (df.iloc[c1]['Low'] < df.iloc[c1]['BBL'])
                                 )) & (df['Date'].dt.time > pd.to_datetime('09:30:00').time())
+        
+        no_trade_mega_gap_down2 = (((((df.iloc[c3]['BBU'] - df.iloc[c925]['BBL'])/ df.iloc[c3]['BBU']) * 100 > 80)
+                                & (df.iloc[c1]['Close'] < df.iloc[c1]['BBL'])
+                                & (df.iloc[c2]['Close'] < df.iloc[c2]['BBL'])
+                                & ((df.iloc[c930 - 1]['Close'] > df.iloc[c930]['Close']) | (df.iloc[c930 - 2]['Close'] > df.iloc[c930]['Close']))
+                                )) & (df['Date'].dt.time > pd.to_datetime('19:24:00').time())
     
     no_trade_gapup_then_fall = false_series
     no_trade_constant_down = false_series
@@ -233,6 +241,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
     no_trade_huge_opening_at_all = bool(no_trade_huge_opening.any())
     no_trade_huge_down_at_all = bool(no_trade_huge_down.any())
     no_trade_mega_gap_down_at_all = bool(no_trade_mega_gap_down.any())
+    no_trade_mega_gap_down2_at_all = bool(no_trade_mega_gap_down2.any())
 
    # time windows for applying each checkpoint rule
     t0_window = (df['Date'].dt.time >= pd.to_datetime('09:15:00').time()) & (df['Date'].dt.time <= pd.to_datetime('10:14:00').time())
@@ -272,6 +281,7 @@ def generate_buy_signals(df: pd.DataFrame, expiry_date: Optional[object] = None)
         or no_trade_at_huge_gap_up_at_all
         or no_trade_gap_up_red_1_at_all
         or no_trade_huge_opening_at_all
+        or no_trade_mega_gap_down2_at_all
     )
     persistent_hard_block = (
         no_trade_gap_down_green_at_all
