@@ -1,6 +1,9 @@
 from unittest.mock import Mock, patch
+from contextlib import closing
+import sqlite3
 
 import pandas as pd
+import pytest
 
 from src.data.market_store import MarketStore, strategy_fingerprint
 from src.data.data_fetcher import fetch_intraday_data
@@ -72,3 +75,43 @@ def test_contract_metadata_roundtrip(tmp_path):
     store.save_contract("NIFTY", "2026-01-05", 25000, "CE", "NSE", "NSE_FO|1", "2026-01-06", "expired_contract_api")
     assert store.load_contract("NIFTY", "2026-01-05", 25000, "CE", "NSE") == ("NSE_FO|1", "2026-01-06", "expired_contract_api")
     assert store.load_contract("NIFTY", "2026-01-05", 25000, "PE", "NSE") is None
+
+
+def test_retention_keeps_latest_ten_runs_and_market_data(tmp_path):
+    store = MarketStore(tmp_path / "market.sqlite3")
+    store.save_day("NSE_FO|1", "2026-01-06", "1minute", "2026-01-05", candles(), "expired")
+    store.save_contract("NIFTY", "2026-01-05", 25000, "CE", "NSE", "NSE_FO|1", "2026-01-06", "expired_contract_api")
+    for index in range(12):
+        kind = "Historical" if index % 2 else "Selected instrument"
+        store.save_run(kind, f"run-{index}", {}, {"Return (%)": index},
+                       [{"Return (%)": index}], strategy="v1")
+    reopened = MarketStore(store.path)
+    assert reopened.list_runs()["Run ID"].tolist() == list(range(12, 2, -1))
+    assert reopened.load_results(1).empty and reopened.load_results(2).empty
+    assert reopened.load_results(3).iloc[0]["Return (%)"] == 2
+    pd.testing.assert_frame_equal(reopened.load_day("NSE_FO|1", "2026-01-06", "1minute", "2026-01-05"), candles())
+    assert reopened.load_contract("NIFTY", "2026-01-05", 25000, "CE", "NSE") is not None
+
+
+def test_prune_existing_history_is_idempotent(tmp_path):
+    store = MarketStore(tmp_path / "market.sqlite3")
+    with closing(store.connect()) as conn, conn:
+        # Model history created before the retention policy was introduced.
+        conn.executemany(
+            "INSERT INTO backtest_runs (created_at,kind,label,strategy,context,summary,results) VALUES (?,?,?,?,?,?,?)",
+            [("2026-01-01T00:00:00+00:00", "Historical", str(i), "v1", "{}", "{}", "[]") for i in range(15)],
+        )
+    assert store.prune_runs() == 5
+    assert store.prune_runs() == 0
+    assert store.list_runs()["Run ID"].tolist() == list(range(15, 5, -1))
+
+
+def test_failed_retention_rolls_back_new_run(tmp_path):
+    store = MarketStore(tmp_path / "market.sqlite3")
+    for index in range(10):
+        store.save_run("Historical", str(index), {}, {}, [], strategy="v1")
+    with closing(store.connect()) as conn, conn:
+        conn.execute("CREATE TRIGGER reject_delete BEFORE DELETE ON backtest_runs BEGIN SELECT RAISE(ABORT, 'test retention failure'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="test retention failure"):
+        store.save_run("Historical", "new run", {}, {}, [], strategy="v1")
+    assert store.list_runs()["Run ID"].tolist() == list(range(10, 0, -1))

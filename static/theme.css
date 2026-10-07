@@ -472,6 +472,24 @@ table {
 }
 
 /* Order History Tab */
+/* Keep summaries readable while Shiny replaces a selected run's output. */
+#saved_backtest_summary.recalculating,
+#historical_backtest_summary.recalculating {
+  opacity: 1 !important;
+}
+
+#saved_backtest_summary.recalculating::before {
+  content: "Loading selected run\2026";
+  display: block;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.saved-backtest-comparison {
+  margin-top: 16px;
+}
+
 .order-history-panel {
   padding: 16px;
   background: linear-gradient(180deg, rgba(20, 28, 39, 0.88), rgba(13, 19, 28, 0.88));

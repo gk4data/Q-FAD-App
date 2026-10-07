@@ -15,14 +15,28 @@ supplied every market minute. Raw OHLCV and OI (when supplied) are stored;
 indicators and signals are recalculated each run. Historical contract mappings
 retain underlying, strike, side, exchange and expiry separately from candles.
 
-Use the Backtest label field before running either backtest workflow. Each run
+Historical runs are automatically labelled with their start timestamp in IST.
+Selected-instrument runs use the Backtest label field in the sidebar. Each run
 saves its metrics, settings, timestamp, label and a fingerprint of the strategy,
 indicator and data preparation source files. Historical runs save the daily
 CE/PE table and its existing TOTAL row; selected-instrument runs save trades.
 The Saved Backtests tab displays all saved runs and lets you inspect their
-details without downloading candles or recomputing signals. Refresh picks up
+details without downloading candles or recomputing signals. Select a run at the
+top to see the same return summary cards and colour-coded results as Historical
+Backtest. Export Excel saves the selected run's results and summary in separate
+sheets; expand Compare saved runs for a compact comparison of core metrics.
+Refresh preserves the selected run and picks up
 runs saved in other sessions. Changing strategy code creates a new fingerprint;
 each run remains a separate record even if the strategy is unchanged.
+
+The 10 most recently saved runs are retained across historical and selected-
+instrument backtests combined, ordered by save order rather than trading date.
+Saving a new run deletes older run records (including summaries and detailed
+results) in the same transaction. Startup also applies this limit to existing
+history. Export Excel before a run falls outside the latest 10 if you need to
+keep it. Cached candles and contract metadata are not deleted by this policy.
+Retained runs survive app restarts; deleting or replacing the database removes
+access to its saved history. Git does not contain a copy.
 
 Historical TOTAL returns preserve the app's existing average daily/side return
 calculation, not a compounded portfolio return. Missing contracts, missing data

@@ -97,6 +97,7 @@ def define_server(input, output, session):
     historical_orders_status_msg = reactive.Value("[INFO] Historical data will appear after saving Order History")
     historical_bt_data = reactive.Value(pd.DataFrame())
     market_store = MarketStore()
+    market_store.prune_runs()
     saved_runs_tick = reactive.Value(0)
     historical_bt_status_msg = reactive.Value("[INFO] Select date range and run historical backtest")
 
@@ -112,25 +113,76 @@ def define_server(input, output, session):
         runs = saved_backtest_runs()
         if runs.empty:
             runs = pd.DataFrame({"Message": ["Run a backtest to save results here"]})
-        return render.DataTable(runs, filters=True)
+        else:
+            columns = ["Run ID", "Label", "Type", "From", "To", "Return (%)", "Trades", "Win Rate (%)", "Max Drawdown (%)", "Profit Factor", "Saved At (IST)"]
+            runs = runs[[col for col in columns if col in runs.columns]]
+        return _render_historical_backtest_table(runs, height="320px")
+
+    @reactive.effect
+    def _update_saved_backtest_selector():
+        runs = saved_backtest_runs()
+        choices = {str(row["Run ID"]): f'#{row["Run ID"]} · {row["Label"]} · {row.get("From", "")} to {row.get("To", "")} · {row["Type"]} · {row["Saved At (IST)"]}' for row in runs.to_dict("records")}
+        with reactive.isolate():
+            current = _get_input_value("saved_backtest_id")
+        selected = current if current in choices else next(iter(choices), "")
+        ui.update_select("saved_backtest_id", choices=choices, selected=selected)
+
+    @reactive.calc
+    def selected_saved_backtest():
+        runs = saved_backtest_runs()
+        run_id = _get_input_value("saved_backtest_id")
+        if not run_id or runs.empty:
+            return None
+        match = runs[runs["Run ID"].astype(str) == str(run_id)]
+        return match.iloc[0].to_dict() if not match.empty else None
+
+    @reactive.calc
+    def selected_saved_results():
+        run = selected_saved_backtest()
+        return market_store.load_results(run["Run ID"]) if run else pd.DataFrame()
+
+    @output
+    @render.text
+    def saved_backtest_status():
+        run = selected_saved_backtest()
+        if not run:
+            return "[INFO] No saved run selected. Run a backtest first, then refresh."
+        status = f'Run #{run["Run ID"]} | {run["Label"]} | {run.get("From", "")} to {run.get("To", "")} | Saved: {run["Saved At (IST)"]} IST'
+        incomplete = run.get("Incomplete Rows", 0)
+        if pd.notna(incomplete) and incomplete:
+            status += f" | {int(incomplete)} incomplete results"
+        return status
 
     @output
     @render.ui
-    def saved_backtest_selector():
-        runs = saved_backtest_runs()
-        if runs.empty:
-            return ui.p("No saved runs yet.")
-        choices = {str(row["Run ID"]): f'#{row["Run ID"]} — {row["Label"]} — {row["Type"]} — {row["Saved At (IST)"]}' for row in runs.to_dict("records")}
-        return ui.input_select("saved_backtest_id", "View saved run details", choices=choices)
+    def saved_backtest_summary():
+        run = selected_saved_backtest()
+        if not run:
+            return ui.tags.span("Select a saved run to see its summary and results.", class_="oh-status-text")
+        if run["Type"] == "Historical":
+            return _render_historical_backtest_summary(selected_saved_results())
+        metrics = {key: run[key] for key in ("Return (%)", "Trades", "Win Rate (%)", "Max Drawdown (%)", "Profit Factor", "Equity Final [$]", "Total Profit [$]") if key in run}
+        return ui.HTML(_build_backtest_summary_html(metrics, {"Instrument": run.get("Instrument", ""), "From": run.get("From", ""), "To": run.get("To", "")}))
 
     @output
     @render.data_frame
     def saved_backtest_details():
-        run_id = _get_input_value("saved_backtest_id")
-        df = market_store.load_results(run_id) if run_id else pd.DataFrame()
+        df = selected_saved_results()
         if df.empty:
             df = pd.DataFrame({"Message": ["Select a saved run to view daily results or trades"]})
-        return render.DataTable(df, filters=True)
+        return _render_historical_backtest_table(df)
+
+    @render.download(filename=lambda: f"saved_backtest_{_get_input_value('saved_backtest_id', 'run')}.xlsx")
+    def download_saved_backtest_excel():
+        run = selected_saved_backtest()
+        if not run:
+            return ""
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="qfad_saved_backtest_", suffix=".xlsx")
+        os.close(tmp_fd)
+        with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+            selected_saved_results().to_excel(writer, sheet_name="Results", index=False)
+            pd.DataFrame([run]).to_excel(writer, sheet_name="Run Summary", index=False)
+        return tmp_path
     order_log = reactive.Value(pd.DataFrame(columns=[
         "time", "action", "instrument", "qty", "price", "fill_price", "entry_price_ref", "pnl", "pnl_pct", "order_id", "status", "message"
     ]))
@@ -783,7 +835,9 @@ def define_server(input, output, session):
     @output
     @render.ui
     def historical_backtest_summary():
-        df = historical_bt_data.get()
+        return _render_historical_backtest_summary(historical_bt_data.get())
+
+    def _render_historical_backtest_summary(df):
         if df is None or df.empty:
             return ui.tags.span("[INFO] Summary will appear after running Historical Backtest", class_="oh-status-text")
 
@@ -3288,6 +3342,7 @@ def define_server(input, output, session):
 
         historical_bt_status_msg.set("[INFO] Running historical backtest...")
         started_at = time.perf_counter()
+        run_label = pd.Timestamp.now(tz="Asia/Kolkata").strftime("%Y-%m-%d %H:%M:%S IST")
         rows = []
         run_strategy = strategy_fingerprint()
         processed_days = 0
@@ -3551,7 +3606,7 @@ def define_server(input, output, session):
         try:
             total_summary = out_df.loc[out_df["Date"] == "TOTAL"].iloc[0].to_dict()
             total_summary = {k: v for k, v in total_summary.items() if k not in ("Date", "Side", "Instrument Key", "Expiry", "Resolution Source", "Status")}
-            run_id = market_store.save_run("Historical", _get_input_value("historical_bt_label", "Baseline"),
+            run_id = market_store.save_run("Historical", run_label,
                 {"From": start_iso, "To": end_iso, "Initial Capital": 100000, "Commission": 0.0,
                  "Stop Loss (%)": 15.0, "Fractional Quantities": True, "Interval": "1minute",
                  "Warmup Bars": 60, "Days Processed": processed_days, "Days Skipped": skipped_days,
@@ -3587,16 +3642,6 @@ def define_server(input, output, session):
                 ),
                 "variant": "success",
                 "duration_ms": 8000,
-            },
-        )
-        await session.send_custom_message(
-            "trigger_historical_screenshot",
-            {
-                "id": "historical_backtest_capture",
-                "filename": f"historical_backtest_{start_iso}_{end_iso}.png",
-                "delay_ms": 1200,
-                "retry_delay_ms": 350,
-                "max_attempts": 12,
             },
         )
 
@@ -3912,8 +3957,9 @@ def define_server(input, output, session):
     @output
     @render.data_frame
     def historical_backtest_table():
-        from shiny import render
-        df = historical_bt_data.get()
+        return _render_historical_backtest_table(historical_bt_data.get())
+
+    def _render_historical_backtest_table(df, height="calc(100vh - 320px)", filters=False):
         if df is None or df.empty:
             return render.DataTable(pd.DataFrame({"Message": ["Run Historical Backtest to see results"]}))
 
@@ -3929,7 +3975,7 @@ def define_server(input, output, session):
             styles.append({"cols": ["Side"], "rows": side_s.eq("CE").tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
             styles.append({"cols": ["Side"], "rows": side_s.eq("PE").tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
 
-        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Expectancy per Trade (%)", "Risk-Reward Ratio"]:
+        for col in ["Return (%)", "Buy & Hold Return (%)", "Best Trade (%)", "Worst Trade (%)", "Expectancy per Trade (%)", "Risk-Reward Ratio", "PnL", "Return %"]:
             if col in df.columns:
                 s = pd.to_numeric(df[col], errors="coerce")
                 styles.append({"cols": [col], "rows": s.gt(0).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
@@ -3950,7 +3996,7 @@ def define_server(input, output, session):
             styles.append({"cols": ["Profit Factor"], "rows": s.ge(1).fillna(False).tolist(), "style": {"color": "#67d49b", "font-weight": "700"}})
             styles.append({"cols": ["Profit Factor"], "rows": s.lt(1).fillna(False).tolist(), "style": {"color": "#ff7c6a", "font-weight": "700"}})
 
-        return render.DataTable(df, width="100%", height="calc(100vh - 320px)", styles=styles)
+        return render.DataTable(df, width="100%", height=height, styles=styles, filters=filters)
 
     # ===== Download Handler =====
     @render.download(filename="signals_export.csv")

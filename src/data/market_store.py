@@ -11,6 +11,7 @@ import sqlite3
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
+BACKTEST_RETENTION = 10
 
 
 def strategy_fingerprint():
@@ -121,7 +122,23 @@ class MarketStore:
                 datetime.now(timezone.utc).isoformat(), kind, label.strip() or "Baseline",
                 strategy or strategy_fingerprint(), json.dumps(_clean(context), allow_nan=False),
                 json.dumps(_clean(summary), allow_nan=False), json.dumps(_clean(results), allow_nan=False)))
+            self._prune_runs(conn)
             return cur.lastrowid
+
+    @staticmethod
+    def _prune_runs(conn):
+        # Run IDs track save order, regardless of the dates covered by a backtest.
+        # Summary and detailed results share a row, so both expire together.
+        return conn.execute(
+            "DELETE FROM backtest_runs WHERE id NOT IN "
+            "(SELECT id FROM backtest_runs ORDER BY id DESC LIMIT ?)",
+            (BACKTEST_RETENTION,),
+        ).rowcount
+
+    def prune_runs(self):
+        """Apply retention to pre-existing history, without touching market data."""
+        with closing(self.connect()) as conn, conn:
+            return self._prune_runs(conn)
 
     def list_runs(self):
         with closing(self.connect()) as conn:

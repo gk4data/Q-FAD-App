@@ -305,7 +305,6 @@ def create_main_ui():
                     ui.nav_panel(
                         ui.HTML("<i class='bi bi-clock'></i> Historical Backtest"),
                         ui.div(
-                            ui.input_text("historical_bt_label", "Backtest label", value="Baseline"),
                             ui.div(
                                 ui.row(
                                     ui.column(3, ui.input_date("historical_bt_start", "From", value=date.today())),
@@ -318,18 +317,32 @@ def create_main_ui():
                             ui.div(ui.output_text_verbatim("historical_backtest_status"), class_="order-history-status"),
                             ui.div(ui.output_ui("historical_backtest_summary"), class_="order-history-status"),
                             ui.div(ui.output_data_frame("historical_backtest_table"), class_="order-history-table-wrap"),
-                            id="historical_backtest_capture",
                             class_="order-history-panel",
                         ),
                     ),
-                    ui.nav_panel("Saved Backtests",
+                    ui.nav_panel(ui.HTML("<i class='bi bi-archive'></i> Saved Backtests"),
                         ui.div(
-                            ui.p("Saved runs remain available after restarting the app. Historical total returns are averages across daily CE/PE results. Use labels to identify strategy experiments."),
-                            ui.input_action_button("refresh_saved_backtests", "Refresh saved runs"),
-                            ui.output_data_frame("saved_backtests_table"),
-                            ui.output_ui("saved_backtest_selector"),
-                            ui.output_data_frame("saved_backtest_details"),
-                            style="padding:16px;",
+                            ui.div(
+                                ui.row(
+                                    ui.column(6, ui.input_select("saved_backtest_id", "Saved run", choices={})),
+                                    ui.column(3, ui.input_action_button("refresh_saved_backtests", ui.HTML("<i class='bi bi-arrow-clockwise'></i> Refresh"), class_="btn-primary")),
+                                    ui.column(3, ui.download_button("download_saved_backtest_excel", ui.HTML("<i class='bi bi-file-earmark-excel'></i> Export Excel"), class_="btn-success")),
+                                ),
+                                class_="order-history-actions",
+                            ),
+                            ui.div(ui.output_text_verbatim("saved_backtest_status"), class_="order-history-status"),
+                            ui.p("The 10 most recently saved runs are retained. Older summaries and results are deleted automatically.", style="color:#b0b7c3; font-size:12px;"),
+                            ui.div(ui.output_ui("saved_backtest_summary"), class_="order-history-status"),
+                            ui.div(ui.output_data_frame("saved_backtest_details"), class_="order-history-table-wrap"),
+                            ui.accordion(
+                                ui.accordion_panel("Compare saved runs",
+                                    ui.p("Historical return is the average daily CE/PE return; selected-instrument return covers the full run."),
+                                    ui.div(ui.output_data_frame("saved_backtests_table"), class_="order-history-table-wrap"),
+                                ),
+                                open=False,
+                                class_="saved-backtest-comparison",
+                            ),
+                            class_="order-history-panel",
                         ),
                     ),
                     ui.nav_panel(ui.HTML("<i class='bi bi-flask'></i> Live Trading"), ui.div(ui.output_text_verbatim("position_status"), ui.output_data_frame("orders_table"), style="padding:16px;")),
@@ -381,7 +394,6 @@ def create_app_ui():
     return ui.page_fluid(
         ui.tags.head(
             ui.tags.link(rel="stylesheet", href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"),
-            ui.tags.script(src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"),
             ui.include_css("static/theme.css"),
             ui.tags.script(
                 """
@@ -397,172 +409,6 @@ def create_app_ui():
                     window.setTimeout(triggerClick, delayMs);
                 });
 
-                Shiny.addCustomMessageHandler("trigger_historical_screenshot", function(message) {
-                    const targetId = message && message.id ? message.id : "historical_backtest_capture";
-                    const filename = message && message.filename ? String(message.filename) : "historical_backtest.png";
-                    const delayMs = message && message.delay_ms ? Number(message.delay_ms) : 400;
-                    const retryDelayMs = message && message.retry_delay_ms ? Number(message.retry_delay_ms) : 300;
-                    const maxAttempts = message && message.max_attempts ? Number(message.max_attempts) : 10;
-                    const minWidth = message && message.min_width ? Number(message.min_width) : 200;
-                    const minHeight = message && message.min_height ? Number(message.min_height) : 120;
-                    if (typeof html2canvas === "undefined") {
-                        return;
-                    }
-
-                    const sleep = function(ms) {
-                        return new Promise(function(resolve) {
-                            window.setTimeout(resolve, ms);
-                        });
-                    };
-
-                    const afterPaint = function() {
-                        return new Promise(function(resolve) {
-                            window.requestAnimationFrame(function() {
-                                window.requestAnimationFrame(resolve);
-                            });
-                        });
-                    };
-
-                    const isReady = function(target) {
-                        if (!target) {
-                            return false;
-                        }
-                        const rect = target.getBoundingClientRect();
-                        const style = window.getComputedStyle(target);
-                        return (
-                            rect.width >= minWidth &&
-                            rect.height >= minHeight &&
-                            style.display !== "none" &&
-                            style.visibility !== "hidden"
-                        );
-                    };
-
-                    const prepareCloneForFullWidthCapture = function(sourceTarget) {
-                        const captureRoot = sourceTarget.cloneNode(true);
-                        captureRoot.style.position = "fixed";
-                        captureRoot.style.left = "-100000px";
-                        captureRoot.style.top = "0";
-                        captureRoot.style.zIndex = "2147483647";
-                        captureRoot.style.pointerEvents = "none";
-                        captureRoot.style.width = "max-content";
-                        captureRoot.style.maxWidth = "none";
-                        captureRoot.style.overflow = "visible";
-                        captureRoot.style.background = "#0f172a";
-
-                        const widenNode = function(node) {
-                            if (!node || !node.style) {
-                                return;
-                            }
-                            node.style.overflow = "visible";
-                            node.style.overflowX = "visible";
-                            node.style.overflowY = "visible";
-                            node.style.width = "max-content";
-                            node.style.maxWidth = "none";
-                            node.style.height = "auto";
-                            node.style.maxHeight = "none";
-                        };
-
-                        captureRoot.querySelectorAll(".dataTables_wrapper, .dataTables_scroll, .dataTables_scrollHead, .dataTables_scrollBody, .table-responsive").forEach(widenNode);
-                        captureRoot.querySelectorAll(".dataTables_scrollHeadInner").forEach(function(node) {
-                            if (node && node.style) {
-                                node.style.paddingRight = "0";
-                                node.style.width = "max-content";
-                                node.style.maxWidth = "none";
-                            }
-                        });
-                        captureRoot.querySelectorAll("table").forEach(function(node) {
-                            if (node && node.style) {
-                                node.style.width = "max-content";
-                                node.style.minWidth = "100%";
-                                node.style.tableLayout = "auto";
-                            }
-                        });
-
-                        return captureRoot;
-                    };
-
-                    const captureWhenReady = async function() {
-                        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-                            const target = document.getElementById(targetId);
-                            if (!target) {
-                                await sleep(retryDelayMs);
-                                continue;
-                            }
-
-                            if (document.fonts && document.fonts.ready) {
-                                try {
-                                    await document.fonts.ready;
-                                } catch (err) {
-                                    console.warn("Historical screenshot font wait failed", err);
-                                }
-                            }
-
-                            await afterPaint();
-
-                            if (!isReady(target)) {
-                                await sleep(retryDelayMs);
-                                continue;
-                            }
-
-                            const captureRoot = prepareCloneForFullWidthCapture(target);
-                            document.body.appendChild(captureRoot);
-
-                            try {
-                                await afterPaint();
-
-                                const captureWidth = Math.max(
-                                    captureRoot.scrollWidth || 0,
-                                    captureRoot.getBoundingClientRect().width || 0,
-                                    target.scrollWidth || 0
-                                );
-                                const captureHeight = Math.max(
-                                    captureRoot.scrollHeight || 0,
-                                    captureRoot.getBoundingClientRect().height || 0,
-                                    target.scrollHeight || 0
-                                );
-
-                                const canvas = await html2canvas(captureRoot, {
-                                    backgroundColor: "#0f172a",
-                                    scale: 1,
-                                    useCORS: true,
-                                    logging: false,
-                                    scrollX: 0,
-                                    scrollY: -window.scrollY,
-                                    windowWidth: captureWidth,
-                                    windowHeight: captureHeight
-                                });
-
-                                if (!canvas || canvas.width < 2 || canvas.height < 2) {
-                                    throw new Error("Empty screenshot canvas");
-                                }
-
-                                const link = document.createElement("a");
-                                link.download = filename;
-                                link.href = canvas.toDataURL("image/png");
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                return;
-                            } catch (err) {
-                                console.warn("Historical screenshot attempt failed", { attempt: attempt + 1, err });
-                                await sleep(retryDelayMs);
-                            } finally {
-                                if (captureRoot && captureRoot.parentNode) {
-                                    captureRoot.parentNode.removeChild(captureRoot);
-                                }
-                            }
-                        }
-
-                        console.error("Historical screenshot aborted after retries", {
-                            targetId: targetId,
-                            filename: filename
-                        });
-                    };
-
-                    window.setTimeout(function() {
-                        void captureWhenReady();
-                    }, delayMs);
-                });
 
                 Shiny.addCustomMessageHandler("show_toast", function(message) {
                     const title = message && message.title ? String(message.title) : "Notification";
