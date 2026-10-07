@@ -218,7 +218,7 @@ def fetch_intraday_data(
         try:
             cached = store.load_day(instrument_code, expiry_for_expired, interval, cache_day)
             if cached is not None:
-                return cached
+                return cached.drop(columns=["OI"], errors="ignore")
         except Exception:
             logging.getLogger(__name__).exception("Candle cache read failed; fetching from Upstox")
 
@@ -264,7 +264,9 @@ def fetch_intraday_data(
             store.save_day(instrument_code, expiry_for_expired, interval, cache_day, df, mode)
         except Exception:
             logging.getLogger(__name__).exception("Candle cache save failed")
-    return df
+    # Preserve the strategy's existing OHLCV input: optional/missing OI must not
+    # cause its blanket dropna() to remove otherwise valid candles.
+    return df.drop(columns=["OI"], errors="ignore")
 def filter_to_current_day(df: pd.DataFrame, target_date_str: str) -> pd.DataFrame:
     """
     Filter dataframe to keep only rows from the target date.
