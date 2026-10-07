@@ -55,6 +55,15 @@ tmp_exports/
 live_data/*.csv
 live_data/live_data_ltpc.csv
 live_data/ui_prefs.json
+# Local market data and backtest database (including SQLite sidecars)
+instrument_cache_NSE.pkl
+ui_prefs.json
+*.sqlite3
+*.sqlite3-*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
 live_data/sandbox_token.json
 !live_data/.gitkeep
 
