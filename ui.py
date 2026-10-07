@@ -199,6 +199,7 @@ def backtesting_card():
     return ui.div(
         ui.h5(ui.tags.i(class_="bi bi-bullseye"), " Backtesting", style=SIDEBAR_HEADER_STYLE),
         ui.input_numeric("initial_cash", "Initial Capital", value=100000, min=1000, max=10000000),
+        ui.input_text("backtest_label", "Backtest label", value="Baseline"),
         ui.input_action_button("run_backtest", ui.HTML("<i class='bi bi-play-circle'></i> Run Backtest"), class_="btn-warning", style="width:100%"),
     )
 
@@ -304,6 +305,7 @@ def create_main_ui():
                     ui.nav_panel(
                         ui.HTML("<i class='bi bi-clock'></i> Historical Backtest"),
                         ui.div(
+                            ui.input_text("historical_bt_label", "Backtest label", value="Baseline"),
                             ui.div(
                                 ui.row(
                                     ui.column(3, ui.input_date("historical_bt_start", "From", value=date.today())),
@@ -318,6 +320,16 @@ def create_main_ui():
                             ui.div(ui.output_data_frame("historical_backtest_table"), class_="order-history-table-wrap"),
                             id="historical_backtest_capture",
                             class_="order-history-panel",
+                        ),
+                    ),
+                    ui.nav_panel("Saved Backtests",
+                        ui.div(
+                            ui.p("Saved runs remain available after restarting the app. Historical total returns are averages across daily CE/PE results. Use labels to identify strategy experiments."),
+                            ui.input_action_button("refresh_saved_backtests", "Refresh saved runs"),
+                            ui.output_data_frame("saved_backtests_table"),
+                            ui.output_ui("saved_backtest_selector"),
+                            ui.output_data_frame("saved_backtest_details"),
+                            style="padding:16px;",
                         ),
                     ),
                     ui.nav_panel(ui.HTML("<i class='bi bi-flask'></i> Live Trading"), ui.div(ui.output_text_verbatim("position_status"), ui.output_data_frame("orders_table"), style="padding:16px;")),

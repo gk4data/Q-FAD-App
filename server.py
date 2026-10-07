@@ -27,6 +27,7 @@ from src.data.data_fetcher import (
     filter_to_current_day,
 )
 from src.data.instrument_manager import InstrumentManager
+from src.data.market_store import MarketStore, strategy_fingerprint
 from src.indicators.indicators import calculate_indicators
 from src.signals.regime_detection import detect_regimes_relaxed
 from src.signals.angle_classification import classify_trend_by_angles
@@ -95,7 +96,41 @@ def define_server(input, output, session):
     historical_orders_data = reactive.Value(pd.DataFrame())
     historical_orders_status_msg = reactive.Value("[INFO] Historical data will appear after saving Order History")
     historical_bt_data = reactive.Value(pd.DataFrame())
+    market_store = MarketStore()
+    saved_runs_tick = reactive.Value(0)
     historical_bt_status_msg = reactive.Value("[INFO] Select date range and run historical backtest")
+
+    @reactive.calc
+    def saved_backtest_runs():
+        saved_runs_tick.get()
+        input.refresh_saved_backtests()
+        return market_store.list_runs()
+
+    @output
+    @render.data_frame
+    def saved_backtests_table():
+        runs = saved_backtest_runs()
+        if runs.empty:
+            runs = pd.DataFrame({"Message": ["Run a backtest to save results here"]})
+        return render.DataTable(runs, filters=True)
+
+    @output
+    @render.ui
+    def saved_backtest_selector():
+        runs = saved_backtest_runs()
+        if runs.empty:
+            return ui.p("No saved runs yet.")
+        choices = {str(row["Run ID"]): f'#{row["Run ID"]} — {row["Label"]} — {row["Type"]} — {row["Saved At (IST)"]}' for row in runs.to_dict("records")}
+        return ui.input_select("saved_backtest_id", "View saved run details", choices=choices)
+
+    @output
+    @render.data_frame
+    def saved_backtest_details():
+        run_id = _get_input_value("saved_backtest_id")
+        df = market_store.load_results(run_id) if run_id else pd.DataFrame()
+        if df.empty:
+            df = pd.DataFrame({"Message": ["Select a saved run to view daily results or trades"]})
+        return render.DataTable(df, filters=True)
     order_log = reactive.Value(pd.DataFrame(columns=[
         "time", "action", "instrument", "qty", "price", "fill_price", "entry_price_ref", "pnl", "pnl_pct", "order_id", "status", "message"
     ]))
@@ -205,6 +240,9 @@ def define_server(input, output, session):
         Prefer the historical week's expected expiry first, then fall back to the expired-contract
         API when that contract is no longer present in the current instrument master.
         """
+        cached_contract = market_store.load_contract(symbol, trade_day.isoformat(), strike, instrument_type, exchange)
+        if cached_contract:
+            return tuple(cached_contract)
         expiry_iso = _next_tuesday_for(trade_day).strftime("%Y-%m-%d")
 
         # First try the exact historical weekly expiry in the current instrument master.
@@ -3179,6 +3217,16 @@ def define_server(input, output, session):
                 "From": _as_iso(pd.to_datetime(df["Date"], errors="coerce").min()) if "Date" in df.columns else "",
                 "To": _as_iso(pd.to_datetime(df["Date"], errors="coerce").max()) if "Date" in df.columns else "",
             }
+            save_note = ""
+            try:
+                saved_id = market_store.save_run("Selected instrument", _get_input_value("backtest_label", "Baseline"),
+                    {**context, "Initial Capital": cash, "Commission": 0.0, "Stop Loss (%)": 15.0, "Fractional Quantities": True},
+                    summary, trades_df.to_dict("records"))
+                saved_runs_tick.set(saved_runs_tick.get() + 1)
+                save_note = f" | Saved run #{saved_id}"
+            except Exception:
+                logger.exception("Could not persist selected-instrument backtest")
+                save_note = " | WARNING: results could not be saved"
 
             backtest_summary_data.set(summary)
             trades_data.set(trades_df)
@@ -3202,9 +3250,9 @@ def define_server(input, output, session):
             )
 
             if len(trades_df) == 0:
-                status_msg.set("[WARN] No complete trades (no matching buy/sell signal pairs)")
+                status_msg.set("[WARN] No complete trades (no matching buy/sell signal pairs)" + save_note)
             else:
-                status_msg.set(f"[OK] Backtest complete! {len(trades_df)} trades executed.")
+                status_msg.set(f"[OK] Backtest complete! {len(trades_df)} trades executed.{save_note}")
         except Exception as e:
             status_msg.set(f"[ERROR] Backtest error: {str(e)}")
             traceback.print_exc()
@@ -3241,6 +3289,7 @@ def define_server(input, output, session):
         historical_bt_status_msg.set("[INFO] Running historical backtest...")
         started_at = time.perf_counter()
         rows = []
+        run_strategy = strategy_fingerprint()
         processed_days = 0
         skipped_days = 0
         cursor = start_dt
@@ -3269,6 +3318,7 @@ def define_server(input, output, session):
                 metrics_row = {
                     "Date": day_iso,
                     "Side": side,
+                    "Status": "Not processed",
                     "Expiry": "",
                     "Resolution Source": "",
                     "Instrument Key": "",
@@ -3294,11 +3344,13 @@ def define_server(input, output, session):
                         exchange="NSE",
                     )
                     if not base_inst:
+                        metrics_row["Status"] = "Contract unavailable"
                         rows.append(metrics_row)
                         continue
                     metrics_row["Expiry"] = expiry_iso or ""
                     metrics_row["Resolution Source"] = resolution_source
                     metrics_row["Instrument Key"] = str(base_inst)
+                    market_store.save_contract("NIFTY", day_iso, strike, side, "NSE", str(base_inst), expiry_iso, resolution_source)
 
                     day_df, fetch_mode_used = _fetch_option_history_for_backtest(
                         access_token,
@@ -3309,6 +3361,7 @@ def define_server(input, output, session):
                         preferred_mode=("expired" if resolution_source == "expired_contract_api" else "date_range"),
                     )
                     if day_df is None or day_df.empty:
+                        metrics_row["Status"] = "No candle data"
                         rows.append(metrics_row)
                         continue
 
@@ -3334,6 +3387,7 @@ def define_server(input, output, session):
 
                     trades_df = calculate_manual_pnl(df_day, initial_cash=100000, commission=0.0)
                     summary = get_summary_stats_manual(df_day, trades_df, initial_cash=100000)
+                    metrics_row["Status"] = "Complete"
 
                     if isinstance(summary, dict):
                         metrics_row["Trades"] = int(summary.get("# Trades", 0) or 0)
@@ -3350,6 +3404,7 @@ def define_server(input, output, session):
                         metrics_row["Losing Trades"] = int(summary.get("Losing Trades", 0) or 0)
                     rows.append(metrics_row)
                 except Exception:
+                    metrics_row["Status"] = "Failed"
                     logger.exception(
                         "Historical backtest failed for %s %s %s on %s",
                         side,
@@ -3492,6 +3547,21 @@ def define_server(input, output, session):
         out_df = out_df[existing_preferred + extra_cols]
 
         historical_bt_data.set(out_df)
+        save_warning = ""
+        try:
+            total_summary = out_df.loc[out_df["Date"] == "TOTAL"].iloc[0].to_dict()
+            total_summary = {k: v for k, v in total_summary.items() if k not in ("Date", "Side", "Instrument Key", "Expiry", "Resolution Source", "Status")}
+            run_id = market_store.save_run("Historical", _get_input_value("historical_bt_label", "Baseline"),
+                {"From": start_iso, "To": end_iso, "Initial Capital": 100000, "Commission": 0.0,
+                 "Stop Loss (%)": 15.0, "Fractional Quantities": True, "Interval": "1minute",
+                 "Warmup Bars": 60, "Days Processed": processed_days, "Days Skipped": skipped_days,
+                 "Incomplete Rows": int((out_df.loc[out_df["Date"] != "TOTAL", "Status"] != "Complete").sum()) if "Status" in out_df else len(rows)},
+                total_summary, out_df.to_dict("records"), strategy=run_strategy)
+            saved_runs_tick.set(saved_runs_tick.get() + 1)
+            save_warning = f" | Saved run #{run_id}"
+        except Exception:
+            logger.exception("Could not persist historical backtest")
+            save_warning = " | WARNING: results could not be saved"
         elapsed_s = time.perf_counter() - started_at
         logger.info(
             "Historical backtest completed successfully in %.1fs | rows=%s processed=%s skipped=%s range=%s..%s",
@@ -3503,7 +3573,7 @@ def define_server(input, output, session):
             end_iso,
         )
         historical_bt_status_msg.set(
-            f"[OK] Historical backtest complete in {elapsed_s:.1f}s: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}"
+            f"[OK] Historical backtest complete in {elapsed_s:.1f}s: {len(out_df)} rows | Days processed: {processed_days} | Days skipped: {skipped_days}{save_warning}"
         )
         await session.send_custom_message(
             "show_toast",

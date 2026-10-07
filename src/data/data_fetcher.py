@@ -1,6 +1,8 @@
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+from src.data.market_store import MarketStore
+import logging
 
 BASE = "https://api.upstox.com/v2"
 
@@ -85,8 +87,6 @@ def _to_df(candles):
     }
     df.rename(columns=rename, inplace=True)
     df["Date"] = pd.to_datetime(df["Date"])
-    if "OI" in df.columns:
-        df.drop(columns=["OI"], inplace=True)
     return df.sort_values("Date").reset_index(drop=True)
 
 def concatenate_with_previous_day(
@@ -130,7 +130,7 @@ def concatenate_with_previous_day(
         else:
             prev_df = fetch_intraday_data(
                 instrument_code, access_token, interval=interval, mode="date_range",
-                start=prev_market_day, end=prev_market_day
+                start=prev_market_day, end=prev_market_day, expiry_for_expired=expiry_for_expired
             )
         
         if prev_df.empty:
@@ -208,6 +208,20 @@ def fetch_intraday_data(
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
+    # Cache only completed, single historical days; current-day candles keep refreshing.
+    cache_day = None
+    if mode in ("date_range", "expired") and start == end:
+        if start < pd.Timestamp.now(tz="Asia/Kolkata").strftime("%Y-%m-%d"):
+            cache_day = start
+    store = MarketStore()
+    if cache_day:
+        try:
+            cached = store.load_day(instrument_code, expiry_for_expired, interval, cache_day)
+            if cached is not None:
+                return cached
+        except Exception:
+            logging.getLogger(__name__).exception("Candle cache read failed; fetching from Upstox")
+
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {access_token}",
@@ -244,7 +258,13 @@ def fetch_intraday_data(
     candles = data.get("candles", [])
     if not candles:
         return pd.DataFrame(columns=["Date","Open","High","Low","Close","Volume"])
-    return _to_df(candles)
+    df = _to_df(candles)
+    if cache_day:
+        try:
+            store.save_day(instrument_code, expiry_for_expired, interval, cache_day, df, mode)
+        except Exception:
+            logging.getLogger(__name__).exception("Candle cache save failed")
+    return df
 def filter_to_current_day(df: pd.DataFrame, target_date_str: str) -> pd.DataFrame:
     """
     Filter dataframe to keep only rows from the target date.
